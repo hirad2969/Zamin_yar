@@ -1,0 +1,6 @@
+{
+  "appId": "ir.zaminyar.app",
+  "appName": "زمین‌یار هوشمند",
+  "webDir": "www",
+  "server": { "androidScheme": "https" }
+}
