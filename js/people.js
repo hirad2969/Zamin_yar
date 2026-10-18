@@ -164,7 +164,7 @@
       if (ev.orphan && ev.orphan.length) resBox.appendChild(el('div', { class: 'box err', text: ev.orphan.length + ' سهم به شخص حذف‌شده تعلق دارد و در جمع لحاظ نشد؛ سناریو را بازبینی کنید.' }));
       // ریز تفکیک
       const det = ev.results.filter(x => x.parcels.length).map(x => el('details', null, [el('summary', { text: x.person.name + ' — تفکیک زمین‌ها' }),
-        el('table', { class: 't' }, [el('thead', null, el('tr', null, ['زمین', 'سهم (کسر دقیق)', 'درصد', 'مساحت (م²)', 'ارزش'].map(h => el('th', { text: h })))), el('tbody', null, x.parcels.map(q => el('tr', null, [el('td', { class: 'l', text: q.name }), el('td', { text: fa(q.fractionFrac) }), el('td', { text: fa(q.pct) + '٪' }), el('td', { text: App.n(q.area, 1) }), el('td', { text: App.n(q.value, 0) })])))]),
+        el('table', { class: 't' }, [el('thead', null, el('tr', null, ['زمین', 'سهم (کسر دقیق)', 'درصد', 'مساحت (م²)', 'ارزش'].map(h => el('th', { text: h })))), el('tbody', null, x.parcels.map(q => el('tr', null, [el('td', { class: 'l', text: q.name }), el('td', { text: fa(q.fractionText) }), el('td', { text: fa(q.pct) + '٪' }), el('td', { text: App.n(q.area, 1) }), el('td', { text: App.n(q.value, 0) })])))]),
         el('div', { class: 'note', text: 'به تفکیک محدوده: ' + Object.keys(x.byScope).map(k => C.SCOPES[k] + ' (' + App.n(x.byScope[k].area, 0) + ' م²، ' + App.n(x.byScope[k].value, 0) + ' تومان)').join(' — ') })]));
       det.forEach(d => resBox.appendChild(d));
       // ریز کنترل جمع سهم‌ها برای هر زمین

@@ -1082,7 +1082,7 @@
         r.byAgri[ak] = r.byAgri[ak] || { area: 0, value: 0 };
         r.byAgri[ak].area += ar; r.byAgri[ak].value += fToNumber(valF);
         if (sp.special) r.specialValueF = fAdd(r.specialValueF, valF);
-        r.parcels.push({ id, name: sp.name, fraction: fToNumber(f), fractionFrac: fText(f), pct: fPct(f, 4), value: fToNumber(valF), valueF: valF, area: ar });
+        r.parcels.push({ id, name: sp.name, fraction: fToNumber(f), fractionText: fText(f), pct: fPct(f, 4), value: fToNumber(valF), valueF: valF, area: ar });
       });
       used[id] = sum;
       if (fCmp(sum, F1()) > 0) {
