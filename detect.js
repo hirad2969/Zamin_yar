@@ -86,6 +86,15 @@
     return out;
   }
 
+  function erode(mask, w, h, r) {
+    const I = integral(mask, w, h), er = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (!mask[y * w + x]) continue;
+      const x0 = Math.max(0, x - r), y0 = Math.max(0, y - r), x1 = Math.min(w - 1, x + r), y1 = Math.min(h - 1, y + r);
+      if (winCount(I, w, h, x, y, r) === (x1 - x0 + 1) * (y1 - y0 + 1)) er[y * w + x] = 1; // بیرونِ تصویر «پر» فرض می‌شود
+    }
+    return er;
+  }
   function dilate(mask, w, h, r) {
     const I = integral(mask, w, h), out = new Uint8Array(w * h);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (winCount(I, w, h, x, y, r) > 0) out[y * w + x] = 1;
@@ -188,6 +197,22 @@
     return out;
   }
 
+
+  /* صف اولویت (هیپ دودویی) برای رشد ناحیه‌ی «ساحل‌به‌ساحل» */
+  function Heap(cap) { this.k = new Float64Array(cap); this.v = new Int32Array(cap); this.n = 0; }
+  Heap.prototype.push = function (key, val) {
+    let i = this.n++; const k = this.k, v = this.v;
+    while (i > 0) { const p = (i - 1) >> 1; if (k[p] <= key) break; k[i] = k[p]; v[i] = v[p]; i = p; }
+    k[i] = key; v[i] = val;
+  };
+  Heap.prototype.pop = function () {
+    const k = this.k, v = this.v, top = v[0], key = k[--this.n], val = v[this.n];
+    let i = 0;
+    for (;;) { let c = 2 * i + 1; if (c >= this.n) break; if (c + 1 < this.n && k[c + 1] < k[c]) c++; if (k[c] >= key) break; k[i] = k[c]; v[i] = v[c]; i = c; }
+    if (this.n > 0) { k[i] = key; v[i] = val; }
+    return top;
+  };
+
   function ringArea(r) { let s = 0; for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; s += p[0] * q[1] - q[0] * p[1]; } return Math.abs(s) / 2; }
 
   /**
@@ -249,10 +274,68 @@
       return { level, ok: ring.length >= 3, areaPx: r.area, touchesEdge: r.touches, ring, ringAreaPx: ringArea(ring) };
     }
 
+
+    /* ---- رشد با مساحت تخمینی: برای زمین‌هایی که رنگ‌شان با اطراف تقریباً یکی است ----
+     * ناحیه از مرکز به‌سمت پیکسل‌هایی رشد می‌کند که «مانع» کمتری دارند (لبه + فاصله‌ی رنگ)،
+     * پس مرز کمرنگ هم دیرتر از داخل زمین رد می‌شود؛ رشد با رسیدن به مساحت تخمینی متوقف می‌شود. */
+    let ord = null, costMap = null;
+    function floodOrder(maxK) {
+      maxK = Math.min(n, Math.max(100, Math.round(maxK)));
+      if (ord && (ord.len >= maxK || ord.full)) return ord;
+      const order = new Int32Array(maxK), seen = new Uint8Array(n), heap = new Heap(n + 8);
+      const si = sy * w + sx;
+      if (!costMap) { // هزینه‌ی عبور از هر پیکسل = لبه + فاصله‌ی رنگ؛ کمی هموار تا جبهه‌ی رشد دندانه‌دار نشود
+        const L = col[0], A = col[1], B = col[2], c0 = new Float32Array(n);
+        for (let q = 0; q < n; q++) { const dl = L[q] - m0, da = A[q] - m1, db = B[q] - m2; c0[q] = grad[q] + 0.6 * Math.sqrt(dl * dl + da * da + db * db); }
+        costMap = boxBlur(c0, w, h, 1);
+      }
+      const cost = (q) => costMap[q];
+      let cnt = 0, seq = 0; seen[si] = 1; heap.push(0, si);
+      const keyOf = new Float64Array(n);
+      while (heap.n && cnt < maxK) {
+        const i = heap.pop(), x = i % w, y = (i / w) | 0, ki = keyOf[i];
+        order[cnt++] = i;
+        for (let d = 0; d < 4; d++) {
+          let q;
+          if (d === 0) { if (x === 0) continue; q = i - 1; } else if (d === 1) { if (x === w - 1) continue; q = i + 1; }
+          else if (d === 2) { if (y === 0) continue; q = i - w; } else { if (y === h - 1) continue; q = i + w; }
+          if (seen[q]) continue; seen[q] = 1;
+          const kq = Math.max(ki, cost(q)); keyOf[q] = kq;
+          heap.push(kq + (++seq) * 1e-9, q); // ترتیب ورود برای شکستن تساوی (رشد گرد و یکنواخت)
+        }
+      }
+      ord = { order, len: cnt, full: cnt < maxK };
+      return ord;
+    }
+    function maskPrefix(k) {
+      const o = floodOrder(k * 3 + 500), m = new Uint8Array(n), kk = Math.min(k, o.len);
+      for (let i = 0; i < kk; i++) m[o.order[i]] = 1;
+      // بسته کردن (closing) دندانه‌های جبهه‌ی رشد را صاف می‌کند؛ باز کردن اینجا نباید باشد چون گردنِ باریک به زمین کناری را می‌برد
+      let mm = erode(dilate(m, w, h, 3), w, h, 3);
+      mm = fillHoles(mm, w, h);
+      const comp = component(mm, w, h, sx, sy); if (comp) mm = comp;
+      mm = dilate(mm, w, h, 2);
+      let area = 0, touches = false;
+      for (let i = 0; i < n; i++) if (mm[i]) area++;
+      for (let x = 0; x < w && !touches; x++) if (mm[x] || mm[(h - 1) * w + x]) touches = true;
+      for (let y = 0; y < h && !touches; y++) if (mm[y * w] || mm[y * w + w - 1]) touches = true;
+      return { mask: mm, area, touches };
+    }
+
     const cache = {};
     const get = (level) => cache[level] || (cache[level] = maskAt(level));
     return {
       levels: LEVELS.length,
+      /** نزدیک‌ترین مرز به مساحت تخمینی (پیکسل)؛ برای تصحیح اثر پاک‌سازی چند بار تنظیم می‌شود */
+      byArea(targetPx) {
+        targetPx = Math.max(MIN_AREA, targetPx);
+        let k = targetPx / 1.04, r = maskPrefix(k);
+        for (let it = 0; it < 6 && r.area > 0; it++) {
+          const ratio = targetPx / r.area; if (Math.abs(ratio - 1) < 0.012) break;
+          k = Math.min(n * 0.9, k * ratio); r = maskPrefix(k);
+        }
+        const out = result(-1, r); out.mode = 'area'; out.targetPx = targetPx; return out;
+      },
       run(level) { level = Math.max(0, Math.min(LEVELS.length - 1, level)); return result(level, get(level)); },
       /** بهترین سطح: جایی که مساحت «پایدار» است (کمترین جهش به سطح بعدی) */
       auto() {

@@ -24,8 +24,22 @@
     waiting();
     if (M.map.getZoom() < 16) App.toast('برای دقت بیشتر ابتدا روی زمین زوم کنید (حداقل در حدی که زمین دیده شود)، سپس مرکز آن را لمس کنید.', 'warn');
   };
+  AD.hint = { text: '', unit: 'm2' };
+  function hintInput() {
+    const inp = el('input', { type: 'text', id: 'detect-area', inputmode: 'decimal', dir: 'ltr', placeholder: 'اختیاری', value: AD.hint.text, style: 'width:90px', oninput: (e) => { AD.hint.text = e.target.value; } });
+    const sel = el('select', { id: 'detect-unit', style: 'width:auto', onchange: (e) => { AD.hint.unit = e.target.value; } }, [el('option', { value: 'm2', text: 'متر مربع' }), el('option', { value: 'ha', text: 'هکتار' })]);
+    sel.value = AD.hint.unit;
+    return el('label', { class: 'note', style: 'display:flex;gap:4px;align-items:center' }, ['متراژ تخمینی:', inp, sel]);
+  }
+  /** متراژ تخمینی واردشده (مترمربع) یا null */
+  function hintM2() {
+    const v = App.num(AD.hint.text);
+    if (v == null || !isFinite(v) || v <= 0) return null;
+    return AD.hint.unit === 'ha' ? v * 10000 : v;
+  }
   function waiting() {
-    say([el('b', { text: '🎯 مرکز زمین را روی نقشه لمس کنید' }), el('span', { class: 'note', text: 'نقشه را جابه‌جا/زوم کنید و یک نقطه‌ی داخل زمین را بزنید.' }),
+    say([el('b', { text: '🎯 مرکز زمین را لمس کنید' }), hintInput(),
+      el('span', { class: 'note', text: 'اگر رنگ زمین با اطرافش فرق کمی دارد، متراژ تقریبی را بنویسید تا مرز روی خطوط کمرنگ هم بنشیند.' }),
       el('button', { class: 'btn sm sec2', text: 'انصراف', onclick: () => AD.cancel() })]);
   }
   AD.cancel = function (silent) {
@@ -72,12 +86,18 @@
     await tick();
     let last = null;
     try {
-      for (let zi = 0; zi < ZOOMS.length; zi++) {
+      const est = hintM2();
+      const mpp = (z) => 156543.03392804097 * Math.cos(latlng.lat * Math.PI / 180) / Math.pow(2, z);
+      // با متراژ تخمینی: دورترین زومی که زمین کمتر از ۳۰٪ پنجره را بگیرد؛ بدون آن: از زوم ۱۸
+      let startZi = 0;
+      if (est) { startZi = ZOOMS.findIndex(z => est / (mpp(z) * mpp(z)) <= 0.3 * WIN * WIN); if (startZi < 0) startZi = ZOOMS.length - 1; }
+      for (let zi = startZi; zi < ZOOMS.length; zi++) {
         const z = ZOOMS[zi];
         const g = await grab(latlng, z); await tick();
         const det = LD.prepare(g.img, { x: WIN / 2, y: WIN / 2 });
-        const r = det.auto();
-        last = { z, g, det, r };
+        const targetPx = est ? est / (mpp(z) * mpp(z)) : null;
+        const r = est ? det.byArea(targetPx) : det.auto();
+        last = { z, g, det, r, est, targetPx, mpp: mpp(z) };
         if (r.ok && !r.touchesEdge) break;
         if (zi < ZOOMS.length - 1) { say([el('b', { text: '⏳ زمین بزرگ‌تر از پنجره است؛ با دید وسیع‌تر دوباره تحلیل می‌شود…' })]); await tick(); }
       }
@@ -92,7 +112,7 @@
       App.toast(r.reason === 'small' ? 'ناحیه‌ی همرنگ اطراف این نقطه خیلی کوچک است. نقطه‌ی دیگری از داخل زمین را لمس کنید یا مرز را دستی بکشید.' : 'مرز مشخصی تشخیص داده نشد. مرز را دستی بکشید.', 'warn');
       waiting(); return;
     }
-    AD.st = { latlng, z: last.z, g: last.g, det: last.det, level: r.level };
+    AD.st = { latlng, z: last.z, g: last.g, det: last.det, level: r.level, est: last.est, targetPx: last.targetPx, mpp: last.mpp, mode: last.est ? 'area' : 'level' };
     apply(r, true);
     AD.active = false; M.map.getContainer().style.cursor = ''; hideBar();
     if (r.touchesEdge) App.toast('زمین از محدوده‌ی تحلیل بزرگ‌تر است؛ مرز کامل نیست. مرز را دستی کامل کنید.', 'warn');
@@ -103,18 +123,32 @@
     const s = AD.st;
     const ring = r.ring.map(p => LD.lngLat(s.g.x0 + p[0] + 0.5, s.g.y0 + p[1] + 0.5, s.z));
     s.level = r.level;
-    M.setBoundary(ring, { source: 'auto', meta: { method: 'تشخیص خودکار از تصویر ماهواره‌ای (رشد ناحیه)', zoom: s.z, level: r.level, note: 'تقریبی؛ باید با چشم بررسی شود' }, fit: false });
+    M.setBoundary(ring, { source: 'auto', meta: { method: s.mode === 'area' ? 'تشخیص خودکار با متراژ تخمینی' : 'تشخیص خودکار از تصویر ماهواره‌ای (رشد ناحیه)', zoom: s.z, level: r.level, estimateM2: s.est || null, note: 'تقریبی؛ باید با چشم بررسی شود' }, fit: false });
     if (fit) M.map.fitBounds(L.latLngBounds(ring.map(ll)), { maxZoom: 19, padding: [60, 60] });
   }
 
   /** دکمه‌های حساسیت در نوار ویرایش (فراخوانی از map.js) */
   AD.bar = function (b) {
     const s = AD.st; if (!s) return;
-    b.appendChild(el('span', { class: 'note', text: 'تشخیص خودکار — حساسیت ' + App.n(s.level + 1, 0) + ' از ' + App.n(s.det.levels, 0) }));
-    b.appendChild(el('button', { class: 'btn sm sec2', text: '− کمتر (مرز تنگ‌تر)', disabled: s.level <= 0, onclick: () => step(-1) }));
-    b.appendChild(el('button', { class: 'btn sm sec2', text: '+ بیشتر (مرز گشادتر)', disabled: s.level >= s.det.levels - 1, onclick: () => step(1) }));
+    if (s.mode === 'area') {
+      b.appendChild(el('span', { class: 'note', text: 'تشخیص با متراژ تخمینی ' + App.area(s.est) }));
+      b.appendChild(el('button', { class: 'btn sm sec2', text: '− ۱۰٪ کوچک‌تر', onclick: () => stepArea(1 / 1.1) }));
+      b.appendChild(el('button', { class: 'btn sm sec2', text: '+ ۱۰٪ بزرگ‌تر', onclick: () => stepArea(1.1) }));
+    } else {
+      b.appendChild(el('span', { class: 'note', text: 'تشخیص خودکار — حساسیت ' + App.n(s.level + 1, 0) + ' از ' + App.n(s.det.levels, 0) }));
+      b.appendChild(el('button', { class: 'btn sm sec2', text: '− کمتر (مرز تنگ‌تر)', disabled: s.level <= 0, onclick: () => step(-1) }));
+      b.appendChild(el('button', { class: 'btn sm sec2', text: '+ بیشتر (مرز گشادتر)', disabled: s.level >= s.det.levels - 1, onclick: () => step(1) }));
+    }
     b.appendChild(el('button', { class: 'btn sm sec2', text: '🎯 نقطه‌ی دیگر', onclick: () => AD.start() }));
   };
+  function stepArea(f) {
+    const s = AD.st; if (!s) return;
+    s.est = s.est * f; s.targetPx = s.targetPx * f;
+    const r = s.det.byArea(s.targetPx);
+    if (!r.ok) { App.toast('در این اندازه ناحیه‌ی معتبری پیدا نشد.', 'warn'); s.est /= f; s.targetPx /= f; return; }
+    apply(r, false);
+    if (r.touchesEdge) App.toast('مرز به لبه‌ی محدوده‌ی تحلیل رسید؛ احتمالاً به زمین کناری نشت کرده.', 'warn');
+  }
   function step(d) {
     const s = AD.st; if (!s) return;
     const r = s.det.run(s.level + d);

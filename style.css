@@ -102,6 +102,21 @@ details>summary{cursor:pointer;color:var(--pri2);font-weight:700;margin:4px 0}
 
 #gps-panel{position:absolute;z-index:1100;top:56px;bottom:30px;inset-inline-end:10px;width:400px;max-width:calc(100% - 20px);background:#fff;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.4);overflow:auto;padding:12px}
 #gps-panel[hidden]{display:none}
+/* نقطه‌های مرز: ناحیه‌ی لمس بزرگ (۴۴px) با نقطه‌ی کوچک وسط */
+.vtx-hit{width:44px;height:44px;display:flex;align-items:center;justify-content:center;touch-action:none;cursor:grab}
+#map-cross{position:absolute;z-index:900;left:50%;top:50%;width:46px;height:46px;margin:-23px 0 0 -23px;pointer-events:none}
+#map-cross::before,#map-cross::after{content:"";position:absolute;background:#fff;box-shadow:0 0 0 1px #d32f2f}
+#map-cross::before{left:22px;top:0;width:2px;height:46px}
+#map-cross::after{top:22px;left:0;height:2px;width:46px}
+#loupe{position:absolute;z-index:1500;top:10px;right:10px;width:150px;height:150px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 10px rgba(0,0,0,.55);overflow:hidden;pointer-events:none;background:#cfd8c8;direction:ltr}
+#loupe.left{right:auto;left:64px}
+#loupe[hidden]{display:none}
+#loupe-map{position:absolute;inset:0}
+.loupe-cross{position:absolute;left:50%;top:50%;width:26px;height:26px;margin:-13px 0 0 -13px;pointer-events:none;z-index:1000}
+.loupe-cross::before,.loupe-cross::after{content:"";position:absolute;background:#ffeb3b;box-shadow:0 0 0 1px #000}
+.loupe-cross::before{left:12px;top:0;width:2px;height:26px}
+.loupe-cross::after{top:12px;left:0;height:2px;width:26px}
+#map-cross[hidden]{display:none}
 /* ---- حالت تمام‌صفحه‌ی نقشه (هنگام ترسیم/ویرایش مرز) ---- */
 body.map-focus header.top,body.map-focus #side,body.map-focus #maptools{display:none}
 body.map-focus #mapwrap{flex:1 1 auto}

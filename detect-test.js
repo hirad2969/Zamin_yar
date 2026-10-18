@@ -82,5 +82,31 @@ console.log('۸) مختصات کاشی رفت‌وبرگشت');
   const real = 0.001 * 111320 * Math.cos(32.65 * Math.PI / 180);
   ok(Math.abs(m - real) / real < 0.02, 'مقیاس پیکسل≈0.507m (' + m.toFixed(1) + ' از ' + real.toFixed(1) + ')');
 }
+
+console.log('۹) دو زمین تقریباً هم‌رنگ (اختلاف کم) با متراژ تخمینی');
+{
+  const A1 = [70, 120, 50, 5], A2 = [75, 122, 54, 5];
+  const img = make(512, 512, (x, y) => inRect(x, y, 100, 100, 260, 400) ? A1 : inRect(x, y, 260, 100, 420, 400) ? A2 : BROWN);
+  const truth = 160 * 300;
+  const r = D.prepare(img, { x: 180, y: 250 }).byArea(truth * 0.95); // کاربر ۵٪ کم تخمین زده
+  const a = area(r.ring);
+  ok(r.ok && Math.abs(a - truth) / truth < 0.08, 'مرز روی خط جداکننده‌ی کمرنگ (' + a.toFixed(0) + ' از ' + truth + ')');
+  const xs = r.ring.map(p => p[0]); ok(Math.max.apply(null, xs) < 275 && Math.max.apply(null, xs) > 245, 'لبه‌ی راست نزدیک x=260: ' + Math.max.apply(null, xs).toFixed(0));
+}
+console.log('۱۰) دو زمین هم‌رنگ با خط کمرنگ باریک بین‌شان');
+{
+  const img = make(512, 512, (x, y) => inRect(x, y, 258, 100, 261, 400) ? [58, 108, 40, 5] : inRect(x, y, 100, 100, 420, 400) ? GREEN : BROWN);
+  const truth = 158 * 300;
+  const r = D.prepare(img, { x: 180, y: 250 }).byArea(truth);
+  const a = area(r.ring);
+  ok(r.ok && Math.abs(a - truth) / truth < 0.08, 'مرز روی خط کمرنگ (' + a.toFixed(0) + ' از ' + truth + ')');
+}
+console.log('۱۱) تخمین مساحت ۲۰٪ بیشتر از واقعیت: مرز نباید فاجعه شود');
+{
+  const img = make(512, 512, (x, y) => inRect(x, y, 150, 120, 350, 300) ? GREEN : BROWN);
+  const truth = 200 * 180, r = D.prepare(img, { x: 250, y: 210 }).byArea(truth * 1.2), a = area(r.ring);
+  ok(r.ok && a < truth * 1.4 && a > truth * 0.95, 'مساحت معقول (' + a.toFixed(0) + ' از ' + truth + ')');
+}
+
 console.log('\nنتیجه:', pass, 'موفق،', fail, 'ناموفق');
 process.exit(fail ? 1 : 0);

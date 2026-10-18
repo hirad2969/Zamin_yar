@@ -3,7 +3,7 @@
   'use strict';
   const App = window.App, C = App.C, el = App.el;
   const M = App.map = { map: null, tileOk: 0, tileErr: 0 };
-  const D = { pts: [], mode: 'idle', sel: -1, markers: [], mids: [], shape: null, source: 'draw', meta: null };
+  const D = { precise: !!(window.matchMedia && matchMedia('(pointer:coarse)').matches), pts: [], mode: 'idle', sel: -1, markers: [], mids: [], shape: null, source: 'draw', meta: null };
   M.D = D;
   let drawLayer, savedLayer, previewLayer, searchMarker, savedById = {};
 
@@ -35,10 +35,11 @@
     M.layers = { sat, street, blank };
 
     map.on('click', (e) => {
-      if (D.mode !== 'draw') return;
+      if (D.mode !== 'draw' || D.precise) return;
       D.pts.push([e.latlng.lng, e.latlng.lat]); D.sel = D.pts.length - 1; redraw(); changed();
     });
-    map.on('mousemove', (e) => { if (D.mode === 'draw' && D.pts.length) rubber(e.latlng); });
+    map.on('mousemove', (e) => { if (D.mode === 'draw' && D.pts.length && !D.precise) rubber(e.latlng); });
+    map.on('move', () => { if (D.mode === 'draw' && D.precise && D.pts.length) rubber(map.getCenter()); });
 
     document.getElementById('search-form').addEventListener('submit', (e) => { e.preventDefault(); M.search(document.getElementById('search-q').value); });
     document.addEventListener('keydown', (e) => {
@@ -100,7 +101,7 @@
 
   /* ---------------- ترسیم و ویرایش مرز ---------------- */
   function vIcon(i) {
-    return L.divIcon({ className: '', html: '<div class="vtx' + (i === D.sel ? ' sel' : '') + (i === 0 ? ' first' : '') + '"></div>', iconSize: [20, 20], iconAnchor: [10, 10] });
+    return L.divIcon({ className: '', html: '<div class="vtx-hit"><div class="vtx' + (i === D.sel ? ' sel' : '') + (i === 0 ? ' first' : '') + '"></div></div>', iconSize: [44, 44], iconAnchor: [22, 22] });
   }
   const midIcon = L.divIcon({ className: '', html: '<div class="mid"></div>', iconSize: [14, 14], iconAnchor: [7, 7] });
   let rubberLine = null;
@@ -124,17 +125,17 @@
     clearMarkers();
     if (rubberLine) { rubberLine.remove(); rubberLine = null; }
     D.pts.forEach((p, i) => {
-      const m = L.marker(ll(p), { draggable: true, icon: vIcon(i), keyboard: false, zIndexOffset: 500 });
-      m.on('drag', (e) => { const q = e.target.getLatLng(); D.pts[i] = [q.lng, q.lat]; updateShape(); info(); });
-      m.on('dragend', () => { D.sel = i; redraw(); changed(); });
+      const m = L.marker(ll(p), { draggable: false, icon: vIcon(i), keyboard: false, zIndexOffset: 500 });
       m.on('click', (e) => {
         L.DomEvent.stopPropagation(e);
+        if (Date.now() - lastDragEnd < 400) return;
         if (D.mode === 'draw' && i === 0 && D.pts.length >= 3) { M.finishDraw(); return; }
         D.sel = i; redraw();
       });
       m.on('contextmenu', () => removePoint(i));
       m.on('dblclick', (e) => { L.DomEvent.stopPropagation(e); removePoint(i); });
       m.addTo(drawLayer); D.markers.push(m);
+      attachDrag(m, i);
     });
     if (D.mode === 'edit' && D.pts.length >= 3) {
       D.pts.forEach((p, i) => {
@@ -146,6 +147,61 @@
     }
     updateShape(); info(); drawBar();
   }
+
+  /* ---------- کشیدن نقطه (با ذره‌بین برای لمس) ---------- */
+  let lastDragEnd = 0, loupeMap = null, loupePoly = null, loupeTiles = null;
+  function loupeShow(latlng, clientX, clientY) {
+    const box = document.getElementById('loupe'); if (!box) return;
+    if (!loupeMap) {
+      loupeMap = L.map('loupe-map', { zoomControl: false, attributionControl: false, dragging: false, touchZoom: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false, tap: false });
+      loupeTiles = L.tileLayer(M.SAT_URL, { maxZoom: 21, maxNativeZoom: 19 }).addTo(loupeMap);
+      loupePoly = L.polygon([[0, 0]], { color: '#1565c0', weight: 2, fillOpacity: 0.1, interactive: false }).addTo(loupeMap);
+    }
+    // اگر انگشت در گوشه‌ی بالا-راست است، ذره‌بین به گوشه‌ی دیگر برود
+    const r = M.map.getContainer().getBoundingClientRect();
+    box.classList.toggle('left', clientX > r.right - 190 && clientY < r.top + 190);
+    if (box.hidden) { box.hidden = false; loupeMap.invalidateSize(); }
+    loupeMap.setView(latlng, Math.min(21, M.map.getZoom() + 2), { animate: false });
+    loupePoly.setLatLngs(D.pts.map(ll));
+  }
+  function loupeHide() { const box = document.getElementById('loupe'); if (box) box.hidden = true; }
+  function attachDrag(m, i) {
+    const node = m.getElement(); if (!node) return;
+    node.style.touchAction = 'none';
+    node.addEventListener('pointerdown', (e) => {
+      if (e.button > 0 || (D.mode !== 'draw' && D.mode !== 'edit')) return;
+      e.preventDefault(); e.stopPropagation();
+      const touch = e.pointerType !== 'mouse';
+      const p0 = M.map.latLngToContainerPoint(ll(D.pts[i])), f0 = [e.clientX, e.clientY];
+      let moved = false;
+      try { node.setPointerCapture(e.pointerId); } catch (x) { /* بعضی مرورگرها */ }
+      M.map.dragging.disable();
+      const move = (ev) => {
+        const dx = ev.clientX - f0[0], dy = ev.clientY - f0[1];
+        if (!moved && Math.hypot(dx, dy) < 3) return;
+        moved = true;
+        const q = M.map.containerPointToLatLng(L.point(p0.x + dx, p0.y + dy));
+        D.pts[i] = [q.lng, q.lat]; m.setLatLng(q); updateShape(); info();
+        if (touch) loupeShow(q, ev.clientX, ev.clientY);
+      };
+      const up = () => {
+        node.removeEventListener('pointermove', move); node.removeEventListener('pointerup', up); node.removeEventListener('pointercancel', up);
+        M.map.dragging.enable(); loupeHide();
+        if (moved) { lastDragEnd = Date.now(); D.sel = i; redraw(); changed(); }
+      };
+      node.addEventListener('pointermove', move); node.addEventListener('pointerup', up); node.addEventListener('pointercancel', up);
+      if (touch) loupeShow(M.map.containerPointToLatLng(p0), e.clientX, e.clientY); // ذره‌بین از لحظه‌ی لمس
+    });
+  }
+  M.loupeShow = loupeShow; M.loupeHide = loupeHide;
+
+  /** افزودن نقطه در مرکز نقشه (حالت دقیق: ضربدر وسط، بدون پوشاندن با انگشت) */
+  M.addCenterPoint = function () {
+    if (D.mode !== 'draw') return;
+    const c = M.map.getCenter();
+    D.pts.push([c.lng, c.lat]); D.sel = D.pts.length - 1; redraw(); changed();
+  };
+
   function removePoint(i) {
     if (i < 0 || i >= D.pts.length) return;
     D.pts.splice(i, 1); D.sel = Math.min(D.sel, D.pts.length - 1);
@@ -165,13 +221,17 @@
     return 'نقطه‌ها: <b>' + App.n(b.count, 0) + '</b> — مساحت: <b>' + App.area(b.area) + '</b> — ' + (b.valid ? '<span class="pos">هندسه معتبر</span>' : '<span class="neg">نامعتبر: ' + App.esc(b.errors[0]) + '</span>');
   }
   M.liveHtml = liveHtml;
+  function syncCross() { const c = document.getElementById('map-cross'); if (c) c.hidden = !(D.mode === 'draw' && D.precise); }
   function drawBar() {
+    syncCross();
     const bar = document.getElementById('draw-bar');
     if (D.mode === 'idle') { bar.hidden = true; return; }
     bar.hidden = false; bar.innerHTML = '';
     bar.appendChild(el('span', { id: 'draw-live', html: liveHtml(M.info) }));
     if (D.mode === 'draw') {
-      bar.appendChild(el('span', { class: 'note', text: 'روی نقشه کلیک کنید تا نقطه اضافه شود؛ برای پایان روی نقطه‌ی اول بزنید.' }));
+      bar.appendChild(el('span', { class: 'note', text: D.precise ? 'نقشه را بکشید تا ضربدر وسط روی گوشه‌ی زمین بنشیند، سپس «افزودن نقطه» را بزنید.' : 'روی نقشه کلیک کنید تا نقطه اضافه شود؛ برای پایان روی نقطه‌ی اول بزنید.' }));
+      if (D.precise) bar.appendChild(el('button', { class: 'btn sm', id: 'add-center', text: '＋ افزودن نقطه (وسط ضربدر)', onclick: () => M.addCenterPoint() }));
+      bar.appendChild(el('button', { class: 'btn sm sec2', id: 'precise-toggle', text: D.precise ? 'لمس مستقیم' : '🎯 حالت دقیق (ضربدر)', onclick: () => { D.precise = !D.precise; syncCross(); redraw(); } }));
       bar.appendChild(el('button', { class: 'btn sm', text: 'پایان ترسیم', onclick: () => M.finishDraw() }));
       bar.appendChild(el('button', { class: 'btn sm sec2', text: 'حذف آخرین نقطه', onclick: () => removePoint(D.pts.length - 1) }));
     } else {
