@@ -9,7 +9,7 @@
 
   const bar = () => document.getElementById('detect-bar');
   const ll = (p) => [p[1], p[0]];
-  function say(nodes) { const b = bar(); b.hidden = false; b.innerHTML = ''; [].concat(nodes).forEach(n => b.appendChild(typeof n === 'string' ? el('span', { text: n }) : n)); }
+  function say(nodes) { const b = bar(); b.hidden = false; b.innerHTML = ''; [].concat(nodes).filter(Boolean).forEach(n => b.appendChild(typeof n === 'string' ? el('span', { text: n }) : n)); }
   function hideBar() { bar().hidden = true; bar().innerHTML = ''; }
 
   AD.start = function () {
