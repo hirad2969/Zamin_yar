@@ -101,11 +101,13 @@
     R.bnd = el('div', { class: 'box info', id: 'f-bnd' });
     r.appendChild(section(1, 'موقعیت و مرز زمین', 'از روی نقشه', [
       el('div', { class: 'note', text: 'محل را با جست‌وجوی نام یا مختصات (کادر بالای نقشه) پیدا کنید؛ سپس مرز را ترسیم کنید یا مختصات آماده را وارد کنید.' }),
+      el('div', { class: 'note', text: 'زمین بدون مرز مشخص روی عکس: اگر متراژ را می‌دانید، در «تشخیص خودکار» کادر «متراژ تخمینی» را پر کنید تا مرز با همان مساحت ساخته شود؛ اگر نمی‌دانید، کادر را خالی بگذارید و با GPS (دور زدن) یا ترسیم دستی اندازه بگیرید. برای جداکردن یک قسمت با متراژ مشخص از یک زمین بزرگ‌تر، «✂️ تقسیم به دو قسمت با متراژ مشخص» خط جداکننده را دقیقاً جایی می‌کشد که مساحت درست شود و جهتش قابل چرخاندن است.' }),
       el('div', { class: 'row', style: 'margin:6px 0' }, [
         el('button', { class: 'btn', text: '🎯 تشخیص خودکار مرز (لمس مرکز زمین)', onclick: () => App.detect.start() }),
         el('button', { class: 'btn', text: '✏️ ترسیم مرز روی نقشه', onclick: () => M.startDraw() }),
         el('button', { class: 'btn', text: '📥 ورود مختصات آماده', onclick: () => App.importer.open() }),
         el('button', { class: 'btn', text: '📍 اندازه‌گیری با GPS (پیاده‌روی)', onclick: () => App.gps.open() }),
+        el('button', { class: 'btn', text: '✂️ تقسیم به دو قسمت با متراژ مشخص', onclick: () => App.split.openCurrent() }),
         el('button', { class: 'btn sm sec2', text: 'ویرایش دقیق نقاط', onclick: () => M.pointsEditor() }),
         el('button', { class: 'btn sm sec2', text: 'نمایش روی نقشه', onclick: () => { const b = M.getBoundary(); if (b.count) M.map.fitBounds(b.ring.map(q => [q[1], q[0]]), { maxZoom: 18, padding: [40, 40] }); } }),
       ]),

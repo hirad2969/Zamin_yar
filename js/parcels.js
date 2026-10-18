@@ -33,6 +33,8 @@
           el('td', { html: App.n(va.settingsVersion, 0) + (old ? ' <span class="tag prov">قدیمی</span>' : '') }),
           el('td', null, el('div', { class: 'row' }, [
             el('button', { class: 'btn sm', text: 'باز کردن', onclick: () => { App.tab('map'); App.form.open(p.id, true); } }),
+            (p.geometry && p.geometry.ring && p.geometry.ring.length >= 3)
+              ? el('button', { class: 'btn sm sec2', text: '✂️ تقسیم', title: 'تقسیم این زمین به دو قسمت با متراژ مشخص', onclick: () => App.split.openParcel(p.id) }) : null,
             el('button', { class: 'btn sm sec2', text: 'تاریخچه', onclick: () => history(p) }),
             old ? el('button', { class: 'btn sm sec2', text: 'قیمت جدید', onclick: () => recalcOne(p) }) : null,
           ])),

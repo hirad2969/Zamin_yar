@@ -32,6 +32,140 @@
   const clone = (o) => JSON.parse(JSON.stringify(o));
 
   /* ---------------------------------------------------------------- */
+  /* کسر دقیق                                                          */
+  /* سهم‌ها به‌صورت کسر صحیح (صورت/مخرج با BigInt) نگهداری می‌شوند تا      */
+  /* جمع و تفریق آن‌ها هیچ خطای گردکردن نداشته باشد (مثلاً ۱/۸ + ۳/۸ = ۱/۲ */
+  /* دقیقاً، و سه‌تا ۱/۳ دقیقاً ۱). گردکردن فقط هنگام نمایش انجام می‌شود.  */
+  /* ---------------------------------------------------------------- */
+  const BI = (x) => (typeof x === 'bigint' ? x : BigInt(x));
+  function gcdBig(a, b) {
+    a = a < 0n ? -a : a; b = b < 0n ? -b : b;
+    while (b !== 0n) { const t = a % b; a = b; b = t; }
+    return a === 0n ? 1n : a;
+  }
+  /** ساخت کسر کاهش‌یافته؛ مخرج پیش‌فرض ۱ */
+  function frac(n, d) {
+    let nn = BI(n); const dd = d === undefined ? 1n : BI(d);
+    if (dd === 0n) throw new Error('مخرج کسر نمی‌تواند صفر باشد');
+    if (dd < 0n) { nn = -nn; }
+    const dd2 = dd < 0n ? -dd : dd;
+    const g = gcdBig(nn, dd2);
+    return { n: nn / g, d: dd2 / g };
+  }
+  const isFrac = (x) => !!x && typeof x === 'object' && typeof x.n === 'bigint' && typeof x.d === 'bigint';
+  const fAdd = (a, b) => frac(a.n * b.d + b.n * a.d, a.d * b.d);
+  const fSub = (a, b) => frac(a.n * b.d - b.n * a.d, a.d * b.d);
+  const fMul = (a, b) => frac(a.n * b.n, a.d * b.d);
+  function fDiv(a, b) { if (b.n === 0n) throw new Error('تقسیم بر کسر صفر'); return frac(a.n * b.d, a.d * b.n); }
+  const fNeg = (a) => ({ n: -a.n, d: a.d });
+  const fAbs = (a) => ({ n: a.n < 0n ? -a.n : a.n, d: a.d });
+  function fCmp(a, b) { const x = a.n * b.d, y = b.n * a.d; return x < y ? -1 : (x > y ? 1 : 0); }
+  const fEq = (a, b) => fCmp(a, b) === 0;
+  const fSign = (a) => (a.n > 0n ? 1 : (a.n < 0n ? -1 : 0));
+  const fToNumber = (a) => Number(a.n) / Number(a.d);
+  const F0 = () => frac(0);
+  const F1 = () => frac(1);
+
+  /** کسر دقیق از رشته‌ی اعشاری: «12.5» ⇒ ۲۵/۲ (بدون هیچ تقریب) */
+  function fFromDecimal(t) {
+    const m = /^([-+]?)(\d*)(?:\.(\d*))?(?:[eE]([-+]?\d+))?$/.exec(t);
+    if (!m || (m[2] === '' && (m[3] == null || m[3] === ''))) return null;
+    const sign = m[1] === '-' ? -1n : 1n;
+    const ip = m[2] || '0', fp = m[3] || '';
+    let n = BI(ip + fp);
+    let d = 10n ** BI(fp.length);
+    if (m[4]) { const e = Number(m[4]); if (e >= 0) n = n * (10n ** BI(e)); else d = d * (10n ** BI(-e)); }
+    const f = frac(sign * n, d);
+    return f;
+  }
+  /**
+   * کسر دقیق از هر ورودی: عدد، رشته‌ی فارسی/انگلیسی، کسر «1/8»، درصد «12.5%»،
+   * عدد مخلوط «3 1/4»، یا بسته‌ی ذخیره‌شده {num,den} / {n,d}
+   */
+  function toFrac(v) {
+    if (v == null || v === '') return null;
+    if (isFrac(v)) return v;
+    if (typeof v === 'number') return isFinite(v) ? fFromDecimal(String(v)) : null;
+    if (typeof v === 'object') {
+      if (v.num != null && v.den != null) { try { return frac(BI(String(v.num).trim()), BI(String(v.den).trim())); } catch (e) { return null; } }
+      if (v.n != null && v.d != null) { try { return frac(BI(String(v.n).trim()), BI(String(v.d).trim())); } catch (e) { return null; } }
+      return null;
+    }
+    let s = normDigits(v).replace(/[\u066B\u066C]/g, '').trim();
+    const pct = /[٪%]/.test(s);
+    s = s.replace(/[٪%]/g, '').replace(/,/g, '').trim();
+    if (s === '') return null;
+    let f = null;
+    if (s.indexOf('/') >= 0) {
+      // «3 1/4» (عدد مخلوط) یا «1/8» یا «12.5/100»
+      const parts = s.split(/\s+/).filter(Boolean);
+      const withSlash = parts.filter(p => p.indexOf('/') >= 0);
+      if (withSlash.length !== 1) return null;
+      const ab = withSlash[0].split('/');
+      if (ab.length !== 2) return null;
+      const fa = fFromDecimal(ab[0].trim()), fb = fFromDecimal(ab[1].trim());
+      if (!fa || !fb || fb.n === 0n) return null;
+      f = fDiv(fa, fb);
+      for (const p of parts) {
+        if (p.indexOf('/') >= 0) continue;
+        const w = fFromDecimal(p.trim());
+        if (!w) return null;
+        f = fAdd(f, w);
+      }
+    } else {
+      f = fFromDecimal(s);
+    }
+    if (!f) return null;
+    return pct ? fDiv(f, frac(100)) : f;
+  }
+  /** بسته‌بندی کسر برای ذخیره در JSON (BigInt مستقیم ذخیره نمی‌شود) */
+  const fPack = (f) => ({ num: String(f.n), den: String(f.d) });
+  /** نمایش کسر: «5» یا «1/8» یا «5/4» (همیشه کسر ساده، بدون عدد مخلوط؛ چون در ورودی هم قابل خواندن است) */
+  function fText(f) {
+    if (!isFrac(f)) return '—';
+    if (f.d === 1n) return String(f.n);
+    return String(f.n) + '/' + String(f.d);
+  }
+  /** نمایش با عدد مخلوط برای متن‌های تشریحی («۱ و ۱/۴») */
+  function fMixed(f) {
+    if (!isFrac(f)) return '—';
+    if (f.d === 1n) return String(f.n);
+    const w = f.n / f.d, r = f.n % f.d;
+    if (r === 0n) return String(w);
+    if (w !== 0n && (w > 0n) === (r > 0n)) return String(w) + ' و ' + (r < 0n ? -r : r) + '/' + String(f.d);
+    return fText(f);
+  }
+  const trim0 = (s) => s.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+  /** نمایش درصدی کسر با حداکثر d رقم اعشار (اعداد به‌صورت لاتین؛ فارسی‌سازی در رابط) */
+  function fPct(f, d) {
+    if (!isFrac(f)) return '—';
+    const x = fToNumber(fMul(f, frac(100)));
+    const dd = d == null ? 6 : d;
+    return trim0(x.toFixed(dd));
+  }
+  /** نمایش عدد/کسر به‌صورت خوانا برای متن‌های هسته */
+  function fNum(f, d) {
+    if (!isFrac(f)) return '—';
+    return f.d === 1n ? String(f.n) : trim0(fToNumber(f).toFixed(d == null ? 4 : d));
+  }
+  /**
+   * تجزیه‌ی ورودی «سهم» کاربر در جدول تقسیم:
+   * «12.5» یا «۱۲٫۵٪» ⇒ درصدی از زمین؛ «1/8» یا «۱/۸» ⇒ کسر دقیق از زمین
+   */
+  function parseShare(v) {
+    if (v == null) return null;
+    const s = normDigits(String(v)).trim();
+    if (s === '') return { empty: true };
+    const hasPct = /[٪%]/.test(s);
+    const hasSlash = s.indexOf('/') >= 0 && !hasPct;
+    const f = toFrac(s.replace(/[٪%]/g, ''));
+    if (!f) return { error: 'عدد یا کسر معتبر نیست' };
+    if (fSign(f) < 0) return { error: 'سهم منفی ممکن نیست' };
+    return hasSlash ? { frac: f, kind: 'ratio', text: fText(f), pct: fPct(f, 4) }
+      : { frac: fDiv(f, frac(100)), kind: 'percent', text: fText(fDiv(f, frac(100))), pct: fPct(fDiv(f, frac(100)), 4) };
+  }
+
+  /* ---------------------------------------------------------------- */
   /* سیستم مختصات                                                      */
   /* ---------------------------------------------------------------- */
   const CRS_LIST = [
@@ -169,6 +303,238 @@
       if (area > 5e9) warnings.push('مساحت بسیار بزرگ است (بیش از ۵۰۰٬۰۰۰ هکتار)؛ سیستم مختصات را بررسی کنید');
     }
     return { valid: errors.length === 0, errors, warnings, ring: r, area, count: r.length };
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* برش زمین با خط مستقیم: «تقسیم یک زمین به دو قسمت با متراژ مشخص»     */
+  /* خط جداکننده دقیقاً جایی گذاشته می‌شود که مساحت یک قسمت برابر متراژ   */
+  /* خواسته‌شده شود (جست‌وجوی دوتایی روی جابه‌جایی خط) و جهت آن گردان است. */
+  /* چون تصویر محلی هم‌مساحت (LAEA) است، مساحت در صفحه = مساحت واقعی زمین. */
+  /* ---------------------------------------------------------------- */
+  const fmtM2 = (x) => (isFinite(x) ? x.toLocaleString('en', { maximumFractionDigits: 2 }) : '—');
+
+  /** تصویر محلی هم‌مساحت حول مرکز حلقه + تبدیل معکوس */
+  function localPlane(ringLonLat) {
+    const r = openRing(ringLonLat);
+    const cx = r.reduce((s, p) => s + p[0], 0) / r.length;
+    const cy = r.reduce((s, p) => s + p[1], 0) / r.length;
+    if (proj4) {
+      const def = `+proj=laea +lat_0=${cy} +lon_0=${cx} +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs`;
+      const conv = proj4('EPSG:4326', def);
+      const fwd = typeof conv === 'function' ? conv : (p) => conv.forward(p);
+      const inv = typeof conv === 'function' ? (q) => proj4(def, 'EPSG:4326', q) : (q) => conv.inverse(q);
+      return { toXY: (p) => fwd([p[0], p[1]]), toLonLat: (q) => inv([q[0], q[1]]), center: [cx, cy], kind: 'laea' };
+    }
+    const Ra = 6371007.2, rad = Math.PI / 180, k = Ra * rad * Math.cos(cy * rad), k2 = Ra * rad;
+    return {
+      toXY: (p) => [k * (p[0] - cx), k2 * (p[1] - cy)],
+      toLonLat: (q) => [cx + q[0] / k, cy + q[1] / k2],
+      center: [cx, cy], kind: 'sphere',
+    };
+  }
+  function ringAreaXY(pts) {
+    let s = 0;
+    for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; s += a[0] * b[1] - b[0] * a[1]; }
+    return Math.abs(s) / 2;
+  }
+  /** مرکز سطحی چندضلعی (نه میانگین رأس‌ها) تا خط با جابه‌جایی صفر زمین را نصف کند */
+  function centroidXY(pts) {
+    let a2 = 0, sx = 0, sy = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i], q = pts[(i + 1) % pts.length], cr = p[0] * q[1] - q[0] * p[1];
+      a2 += cr; sx += (p[0] + q[0]) * cr; sy += (p[1] + q[1]) * cr;
+    }
+    if (Math.abs(a2) < 1e-12) {
+      const mx = pts.reduce((s, p) => s + p[0], 0) / pts.length, my = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+      return [mx, my];
+    }
+    return [sx / (3 * a2), sy / (3 * a2)];
+  }
+  function dedupeXY(pts) {
+    const EPS = 1e-9, out = [];
+    for (const p of pts) {
+      const q = out[out.length - 1];
+      if (!q || Math.abs(q[0] - p[0]) > EPS || Math.abs(q[1] - p[1]) > EPS) out.push([p[0], p[1]]);
+    }
+    while (out.length > 1) {
+      const a = out[0], b = out[out.length - 1];
+      if (Math.abs(a[0] - b[0]) <= EPS && Math.abs(a[1] - b[1]) <= EPS) out.pop(); else break;
+    }
+    return out;
+  }
+  /** برش با نیم‌صفحه‌ی (p−c)·u ≤ t (ساترلند–هاجمن برای یک نیم‌صفحه) */
+  function clipHalfPlane(pts, u, c, t, keepBelow) {
+    const EPS = 1e-9;
+    const val = (p) => { const s = (p[0] - c[0]) * u[0] + (p[1] - c[1]) * u[1] - t; return keepBelow ? s : -s; };
+    const out = [];
+    for (let i = 0; i < pts.length; i++) {
+      const A = pts[i], B = pts[(i + 1) % pts.length];
+      const va = val(A), vb = val(B);
+      if (va <= EPS) out.push([A[0], A[1]]);
+      if ((va < -EPS && vb > EPS) || (va > EPS && vb < -EPS)) {
+        const k = va / (va - vb);
+        out.push([A[0] + (B[0] - A[0]) * k, A[1] + (B[1] - A[1]) * k]);
+      }
+    }
+    return out;
+  }
+  /**
+   * محورهای برش. azimuth = جهت «خط جداکننده» به درجه، از شمال در جهت ساعتگرد
+   * (۰ ⇒ خط شمالی–جنوبی، ۹۰ ⇒ خط شرقی–غربی). u = بردار عمود بر خط.
+   */
+  function splitAxes(azimuth) {
+    const az = ((azimuth % 360) + 360) % 360, rad = Math.PI / 180;
+    const d = [Math.sin(az * rad), Math.cos(az * rad)];
+    return { az, d, u: [d[1], -d[0]] };
+  }
+  const splitNormal = (opts) => {
+    const ax = splitAxes(isNum(opts.azimuth) ? opts.azimuth : 0);
+    const flip = opts.side === 'b' || opts.side === -1;
+    return { az: ax.az, d: ax.d, u: flip ? [-ax.u[0], -ax.u[1]] : ax.u, side: flip ? 'b' : 'a' };
+  };
+
+  /** آماده‌سازی مرز برای برش (یک بار برای هر مرز؛ بعد فقط متراژ/جهت عوض می‌شود) */
+  function splitPrepare(ringLonLat) {
+    const warnings = [];
+    const v = validateRing(ringLonLat);
+    if (!v.valid) return { ok: false, reason: 'invalid', errors: v.errors, warnings: v.warnings };
+    v.warnings.forEach(w => warnings.push(w));
+    const ring = v.ring, pl = localPlane(ring);
+    const pts = ring.map(p => pl.toXY(p));
+    if (pts.some(q => !isFinite(q[0]) || !isFinite(q[1]))) return { ok: false, reason: 'projection', errors: ['تبدیل مختصات به صفحه‌ی محلی ناموفق بود'], warnings };
+    const total = ringAreaXY(pts);
+    if (!(total > 0)) return { ok: false, reason: 'area', errors: ['مساحت زمین صفر است'], warnings };
+    const c = centroidXY(pts);
+    return { ok: true, ring, plane: pl, pts, c, total, totalArea: areaM2(ring), warnings, projection: pl.kind };
+  }
+  /** بازه‌ی مجاز جابه‌جایی خط برش (متر، نسبت به مرکز سطحی) */
+  function splitOffsetRange(pre, opts) {
+    const { u } = splitNormal(opts || {}), c = pre.c;
+    let lo = Infinity, hi = -Infinity;
+    pre.pts.forEach(p => { const s = (p[0] - c[0]) * u[0] + (p[1] - c[1]) * u[1]; if (s < lo) lo = s; if (s > hi) hi = s; });
+    return { min: lo, max: hi, u };
+  }
+  /** برش در جابه‌جایی مشخص (متر)؛ targetM2 فقط برای گزارش اختلاف است */
+  function splitCut(pre, offsetM, opts, targetM2, iterations) {
+    opts = opts || {};
+    const ax = splitNormal(opts), u = ax.u, c = pre.c, t = isNum(offsetM) ? offsetM : 0;
+    const warnings = pre.warnings.slice();
+    const pa = dedupeXY(clipHalfPlane(pre.pts, u, c, t, true));
+    const pb = dedupeXY(clipHalfPlane(pre.pts, u, c, t, false));
+    if (pa.length < 3 || pb.length < 3) {
+      return { ok: false, reason: 'degenerate', errors: ['در این جهت/جابه‌جایی، خط برش زمین را به دو قسمت معتبر تقسیم نمی‌کند (یک طرف خالی است). جهت را تغییر دهید یا متراژ را کم/زیاد کنید.'], warnings, azimuth: ax.az, side: ax.side, offset: t, totalArea: pre.totalArea };
+    }
+    // خط جداکننده = پاره‌خط مشترک دو قسمت: برخورد خط بی‌نهایت با ضلع‌های مرز
+    const hits = [];
+    const proj = (p) => (p[0] - c[0]) * u[0] + (p[1] - c[1]) * u[1] - t;
+    for (let i = 0; i < pre.pts.length; i++) {
+      const A = pre.pts[i], B = pre.pts[(i + 1) % pre.pts.length];
+      const sa = proj(A), sb = proj(B);
+      if (Math.abs(sa) <= 1e-9 && Math.abs(sb) <= 1e-9) { hits.push([A[0], A[1]], [B[0], B[1]]); continue; }
+      if ((sa <= 0 && sb >= 0) || (sa >= 0 && sb <= 0)) {
+        if (sa === sb) continue;
+        const k = sa / (sa - sb);
+        hits.push([A[0] + (B[0] - A[0]) * k, A[1] + (B[1] - A[1]) * k]);
+      }
+    }
+    let lineXY = [];
+    if (hits.length >= 2) {
+      let w0 = Infinity, w1 = -Infinity, p0 = null, p1 = null;
+      hits.forEach(h => { const w = (h[0] - c[0]) * ax.d[0] + (h[1] - c[1]) * ax.d[1]; if (w < w0) { w0 = w; p0 = h; } if (w > w1) { w1 = w; p1 = h; } });
+      lineXY = [p0, p1];
+      const uniq = hits.filter((h, i) => hits.findIndex(q => Math.abs(q[0] - h[0]) < 1e-6 && Math.abs(q[1] - h[1]) < 1e-6) === i);
+      if (uniq.length > 2) warnings.push('خط برش مرز را بیش از دو بار قطع می‌کند (زمین غیرمحدب است)؛ ممکن است یک قسمت چندتکه باشد. نتیجه را روی نقشه ببینید.');
+    } else warnings.push('نقطه‌ی برخورد خط برش با مرز پیدا نشد.');
+
+    const partA = pa.map(q => pre.plane.toLonLat(q));
+    const partB = pb.map(q => pre.plane.toLonLat(q));
+    const line = lineXY.map(q => pre.plane.toLonLat(q));
+    const areaAXY = ringAreaXY(pa), areaBXY = ringAreaXY(pb);
+    const areaA = partA.length >= 3 ? areaM2(partA) : 0;
+    const areaB = partB.length >= 3 ? areaM2(partB) : 0;
+    const cutLengthM = lineXY.length === 2 ? Math.hypot(lineXY[1][0] - lineXY[0][0], lineXY[1][1] - lineXY[0][1]) : 0;
+    [partA, partB].forEach((ring, i) => {
+      const vv = validateRing(ring);
+      if (!vv.valid && !/مساحت صفر/.test(vv.errors[0] || '')) warnings.push('قسمت ' + (i + 1) + ' هندسه‌ی نامعتبر دارد: ' + vv.errors[0]);
+      else if (!vv.valid) warnings.push('قسمت ' + (i + 1) + ' بسیار کوچک است (' + fmtM2(i ? areaB : areaA) + ' مترمربع).');
+    });
+    if (Math.abs(areaAXY + areaBXY - pre.total) > Math.max(1e-6, pre.total * 1e-9)) warnings.push('کنترل داخلی: جمع مساحت دو قسمت با مساحت کل برابر نشد.');
+    return {
+      ok: true, partA, partB, line, areaA, areaB, areaAXY, areaBXY, cutLengthM,
+      totalArea: pre.totalArea, targetM2: isNum(targetM2) ? targetM2 : null,
+      errorM2: isNum(targetM2) ? areaA - targetM2 : null,
+      ratioA: pre.totalArea ? areaA / pre.totalArea : null,
+      azimuth: ax.az, side: ax.side, offset: t, iterations: iterations == null ? null : iterations,
+      center: c, u, warnings, sourceRing: pre.ring,
+    };
+  }
+  /** برش با متراژ مشخصِ قسمت اول: جابه‌جایی خط با جست‌وجوی دوتایی پیدا می‌شود */
+  function splitByArea(pre, targetM2, opts) {
+    opts = opts || {};
+    if (!pre || !pre.ok) return pre || { ok: false, reason: 'invalid', errors: ['مرز آماده‌سازی نشده است'] };
+    let target = toFrac(targetM2);
+    const tm = target ? fToNumber(target) : NaN;
+    if (!isFinite(tm)) return { ok: false, reason: 'target', errors: ['متراژ خواسته‌شده عدد معتبر نیست'], warnings: pre.warnings, totalArea: pre.totalArea };
+    if (tm <= 0) return { ok: false, reason: 'too_small', errors: ['متراژ قسمت اول باید بیشتر از صفر باشد'], warnings: pre.warnings, totalArea: pre.totalArea };
+    if (tm >= pre.total - 1e-9) return { ok: false, reason: 'too_big', errors: ['متراژ خواسته‌شده (' + fmtM2(tm) + ' م²) از مساحت کل زمین (' + fmtM2(pre.total) + ' م²) کمتر نیست. عدد کوچک‌تری بنویسید.'], warnings: pre.warnings, totalArea: pre.totalArea };
+    const rg = splitOffsetRange(pre, opts);
+    const areaAt = (t) => ringAreaXY(clipHalfPlane(pre.pts, rg.u, pre.c, t, true));
+    const tol = isNum(opts.tolM2) ? opts.tolM2 : Math.max(1e-7, pre.total * 1e-12);
+    let lo = rg.min, hi = rg.max, t = (lo + hi) / 2, it = 0;
+    const maxIter = isNum(opts.maxIter) ? opts.maxIter : 100;
+    for (; it < maxIter; it++) {
+      t = (lo + hi) / 2;
+      const A = areaAt(t);
+      if (Math.abs(A - tm) <= tol) break;
+      if (A < tm) lo = t; else hi = t;
+      if (hi - lo <= 1e-9) break;
+    }
+    const out = splitCut(pre, t, opts, tm, it + 1);
+    if (out.ok && Math.abs(out.errorM2) > Math.max(0.05, tm * 1e-6)) out.warnings.push('دقت برش: اختلاف ' + fmtM2(out.errorM2) + ' مترمربع با متراژ خواسته‌شده.');
+    return out;
+  }
+  /** برش با جابه‌جایی خط (متر) — برای کشیدن خط با ماوس/انگشت */
+  function splitByOffset(pre, offsetM, opts) {
+    if (!pre || !pre.ok) return pre || { ok: false, reason: 'invalid', errors: ['مرز آماده‌سازی نشده است'] };
+    const out = splitCut(pre, offsetM, opts, null, null);
+    if (out.ok) out.targetM2 = out.areaA;
+    return out;
+  }
+  /** تابع ساده: مرز + متراژ ⇒ دو قسمت (بدون نیاز به آماده‌سازی جداگانه) */
+  function splitRingByArea(ringLonLat, targetM2, opts) {
+    const pre = splitPrepare(ringLonLat);
+    if (!pre.ok) return pre;
+    return splitByArea(pre, targetM2, opts);
+  }
+  /** جهت پیشنهادی خط برش: عمود بر کشیدگی زمین (برای زمین‌های دراز، برش عرضی) */
+  function principalAzimuth(ringLonLat) {
+    const pre = splitPrepare(ringLonLat);
+    if (!pre.ok) return null;
+    const pts = pre.pts, c = pre.c;
+    let a2 = 0, mxx = 0, myy = 0, mxy = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i], q = pts[(i + 1) % pts.length], cr = p[0] * q[1] - q[0] * p[1];
+      a2 += cr;
+      mxx += cr * (p[0] * p[0] + p[0] * q[0] + q[0] * q[0]) / 12;
+      myy += cr * (p[1] * p[1] + p[1] * q[1] + q[1] * q[1]) / 12;
+      mxy += cr * (p[0] * q[1] + 2 * p[0] * p[1] + 2 * q[0] * q[1] + q[0] * p[1]) / 24;
+    }
+    const sgn = a2 >= 0 ? 1 : -1, A = a2 / 2;
+    const Mxx = sgn * (mxx - A * c[0] * c[0]), Myy = sgn * (myy - A * c[1] * c[1]), Mxy = sgn * (mxy - A * c[0] * c[1]);
+    if (!(isFinite(Mxx) && isFinite(Myy) && isFinite(Mxy))) return null;
+    const norm = (az) => ((az % 360) + 360) % 360;
+    // زمین تقریباً متقارن (مثلاً مربع): محور کشیدگی یکتا نیست ⇒ عمود بر بلندترین ضلع مرز
+    const mean = (Mxx + Myy) / 2, gap = Math.hypot((Mxx - Myy) / 2, Mxy);
+    if (mean > 0 && gap / mean < 1e-6) {
+      let best = -1, bi = 0;
+      pts.forEach((p, i) => { const q = pts[(i + 1) % pts.length]; const L = Math.hypot(q[0] - p[0], q[1] - p[1]); if (L > best) { best = L; bi = i; } });
+      const p = pts[bi], q = pts[(bi + 1) % pts.length];
+      return norm(Math.atan2(q[0] - p[0], q[1] - p[1]) * 180 / Math.PI + 90);
+    }
+    const th = 0.5 * Math.atan2(2 * Mxy, Mxx - Myy);          // جهت کشیدگی (بیشترین گسترش)
+    let az = norm(-th * 180 / Math.PI);                        // خط برش عمود بر آن
+    [0, 45, 90, 135, 180, 225, 270, 315, 360].forEach(k => { if (Math.abs(az - k) < 0.05) az = k % 360; });
+    return az;
   }
 
   /* ---------------------------------------------------------------- */
@@ -582,10 +948,30 @@
 
   /* ---------------------------------------------------------------- */
   /* اشخاص و موتور تقسیم                                               */
+  /* همه‌ی محاسبه‌ها (حق هر شخص، سهم دریافتی، اختلاف، جمع سهم‌ها) با کسر   */
+  /* دقیق انجام می‌شود و هیچ‌جا به هوش مصنوعی یا سرویس بیرونی نیاز ندارد. */
   /* ---------------------------------------------------------------- */
+  /** کسر وزن شخص: از ذخیره‌ی دقیق (wnum/wden) یا از عدد weight */
+  function personWeightFrac(p) {
+    if (!p) return F1();
+    const packed = (p.wnum != null && p.wden != null) ? toFrac({ num: p.wnum, den: p.wden }) : null;
+    const f = packed || toFrac(p.weight) || F1();
+    return fSign(f) > 0 ? f : F1();
+  }
   function addPerson(state, name, weight) {
-    const p = { id: uid('p'), name: name, weight: isFinite(weight) && weight > 0 ? weight : 1 };
+    let w = toFrac(weight);
+    if (!w || fSign(w) <= 0) w = F1();
+    const p = { id: uid('p'), name: name, weight: fToNumber(w), wnum: String(w.n), wden: String(w.d) };
     state.persons.push(p); return p;
+  }
+  /** تغییر سهم نسبی با ورودی دقیق («1.5» یا «3/2» یا «۱٫۵»)؛ اگر معتبر نباشد null */
+  function setPersonWeight(state, personId, weight) {
+    const p = (state.persons || []).find(x => x.id === personId);
+    if (!p) return null;
+    const w = toFrac(weight);
+    if (!w || fSign(w) <= 0) return null;
+    p.weight = fToNumber(w); p.wnum = String(w.n); p.wden = String(w.d);
+    return w;
   }
   /** ساخت سناریو با «عکس» قیمت‌های فعلی؛ سناریوهای قدیمی دست‌نخورده می‌مانند */
   function createScenario(state, name, parcelIds) {
@@ -601,51 +987,203 @@
     const sc = { id: uid('sc'), name: name || 'سناریو', createdAt: nowIso(), settingsVersion: state.settings.version, parcels: snap, allocations: {} };
     state.scenarios.push(sc); return sc;
   }
-  function setAllocation(scenario, parcelId, personId, fraction) {
-    const a = scenario.allocations[parcelId] = (scenario.allocations[parcelId] || []).filter(x => x.personId !== personId);
-    if (fraction > 0) a.push({ personId, fraction });
-    if (!a.length) delete scenario.allocations[parcelId];
+  /**
+   * ثبت سهم یک شخص از یک زمین با کسر دقیق.
+   * ورودی: عدد (۰٫۱۲۵)، رشته‌ی درصد («12.5» یا «۱۲٫۵٪»)، کسر («1/8»، «۱/۸») یا کسر بسته‌بندی‌شده.
+   * opts.percent = true ⇒ عدد/رشته «درصد» تلقی می‌شود (پیش‌فرض برای ورودی بدون «/»).
+   */
+  function setAllocation(scenario, parcelId, personId, fraction, opts) {
+    const list = (scenario.allocations[parcelId] || []).filter(x => x.personId !== personId);
+    let f = null;
+    // رشته‌ی خالی از کاربر یعنی «درصد» (۱۲٫۵ ⇒ ۱/۸)؛ با opts.share=false کسر مستقیم تلقی می‌شود
+    if (typeof fraction === 'string' && !(opts && opts.share === false)) {
+      const s = parseShare(fraction);
+      if (s && s.frac) f = s.frac;
+    }
+    if (!f) f = toFrac(fraction);
+    if (f && fSign(f) > 0) {
+      const a = scenario.allocations[parcelId] = list;
+      a.push(Object.assign({ personId, fraction: fToNumber(f), shareText: (opts && opts.text) || fText(f) }, fPack(f)));
+    } else if (list.length) scenario.allocations[parcelId] = list;
+    if (scenario.allocations[parcelId] && !scenario.allocations[parcelId].length) delete scenario.allocations[parcelId];
   }
+  /** کسر دقیق یک رکورد سهم (با سازگاری فایل‌های قدیمی که فقط fraction اعشاری دارند) */
+  function allocFrac(a) {
+    if (!a) return F0();
+    const packed = (a.num != null && a.den != null) ? toFrac({ num: a.num, den: a.den }) : null;
+    return packed || toFrac(a.fraction) || F0();
+  }
+  /** جمع دقیق سهم‌های یک زمین */
+  function allocSum(scenario, parcelId) {
+    return (scenario.allocations[parcelId] || []).reduce((s, a) => fAdd(s, allocFrac(a)), F0());
+  }
+  /** سهم برابر و دقیق بین n نفر (مثلاً ۳ نفر ⇒ هرکس دقیقاً ۱/۳) */
+  function setEqualAllocation(scenario, parcelId, personIds) {
+    const n = (personIds || []).length;
+    if (!n) return null;
+    const f = frac(1, n);
+    scenario.allocations[parcelId] = personIds.map(id => Object.assign({ personId: id, fraction: fToNumber(f), shareText: fText(f) }, fPack(f)));
+    return f;
+  }
+
+  /**
+   * ارزیابی سناریو با حساب دقیق:
+   * pool (ارزش کل)، حق هر شخص، دریافتی، اختلاف، جمع سهم‌ها و کنترل‌های درستی.
+   * گردکردن فقط در فیلدهای نمایشی (entitled/received/diff) انجام می‌شود.
+   */
   function evaluateScenario(state, sc) {
-    const persons = state.persons;
-    const totalWeight = persons.reduce((s, p) => s + p.weight, 0) || 1;
+    const persons = state.persons || [];
     const poolIds = Object.keys(sc.parcels);
-    const pool = poolIds.reduce((s, id) => s + (sc.parcels[id].total || 0), 0);
     const errors = [];
-    const res = persons.map(p => ({ person: p, entitled: pool * p.weight / totalWeight, received: 0, area: 0, byScope: {}, byAgri: {}, specialValue: 0, parcels: [] }));
-    const used = {};
+    // ارزش کل مجموعه: total ها عدد صحیح‌اند ⇒ جمع دقیق
+    let poolF = F0();
+    const incomplete = [];
     poolIds.forEach(id => {
-      const al = sc.allocations[id] || [];
-      const sum = al.reduce((s, x) => s + x.fraction, 0);
-      used[id] = sum;
-      if (sum > 1 + 1e-9) errors.push(`مجموع سهم‌های زمین «${sc.parcels[id].name}» بیش از ۱۰۰٪ است`);
-      al.forEach(x => {
-        const r = res.find(z => z.person.id === x.personId); if (!r) return;
-        const sp = sc.parcels[id], val = (sp.total || 0) * x.fraction, ar = (sp.area || 0) * x.fraction;
-        r.received += val; r.area += ar;
-        r.byScope[sp.scope] = r.byScope[sp.scope] || { area: 0, value: 0 }; r.byScope[sp.scope].area += ar; r.byScope[sp.scope].value += val;
-        const ak = sp.agri || 'بدون';
-        r.byAgri[ak] = r.byAgri[ak] || { area: 0, value: 0 }; r.byAgri[ak].area += ar; r.byAgri[ak].value += val;
-        if (sp.special) r.specialValue += val;
-        r.parcels.push({ id, name: sp.name, fraction: x.fraction, value: val, area: ar });
-      });
+      const tt = sc.parcels[id].total;
+      if (isNum(tt)) poolF = fAdd(poolF, frac(Math.round(tt)));
+      else incomplete.push(sc.parcels[id].name || id);
     });
-    res.forEach(r => { r.diff = Math.round(r.received - r.entitled); r.diffPct = r.entitled ? r.diff / r.entitled * 100 : 0; r.received = Math.round(r.received); r.entitled = Math.round(r.entitled); });
-    const unallocated = poolIds.filter(id => used[id] < 1 - 1e-9).map(id => ({ id, name: sc.parcels[id].name, remaining: 1 - used[id], value: Math.round((sc.parcels[id].total || 0) * (1 - used[id])) }));
-    const incomplete = poolIds.filter(id => sc.parcels[id].total == null).map(id => sc.parcels[id].name);
     if (incomplete.length) errors.push('زمین‌های بدون ارزش قطعی در مجموع لحاظ نشده‌اند: ' + incomplete.join('، '));
-    return { pool: Math.round(pool), results: res, unallocated, errors };
+
+    // وزن‌ها و حق هر شخص (دقیق)
+    const wFs = persons.map(personWeightFrac);
+    let wSum = F0(); wFs.forEach(w => { wSum = fAdd(wSum, w); });
+    const entitledF = persons.map((p, i) => (fSign(wSum) > 0 ? fDiv(fMul(poolF, wFs[i]), wSum) : F0()));
+
+    const res = persons.map((p, i) => ({
+      person: p, index: i, weightFrac: wFs[i],
+      entitledShare: fSign(wSum) > 0 ? fDiv(wFs[i], wSum) : F0(),
+      entitledF: entitledF[i], receivedF: F0(),
+      area: 0, byScope: {}, byAgri: {}, specialValueF: F0(), parcels: [],
+    }));
+
+    const used = {}, orphan = [], over = [], under = [];
+    let allocatedF = F0();
+    const alloc = sc.allocations || {};
+    poolIds.forEach(id => {
+      const al = alloc[id] || [];
+      const sp = sc.parcels[id];
+      const totalF = isNum(sp.total) ? frac(Math.round(sp.total)) : F0();
+      let sum = F0();
+      al.forEach(x => {
+        const f = allocFrac(x);
+        sum = fAdd(sum, f);
+        const r = res.find(z => z.person.id === x.personId);
+        if (!r) { orphan.push({ id, personId: x.personId, frac: f }); return; }
+        if (fSign(f) < 0) errors.push(`سهم منفی برای «${sp.name}» ثبت شده است`);
+        const valF = fMul(totalF, f);
+        r.receivedF = fAdd(r.receivedF, valF);
+        allocatedF = fAdd(allocatedF, valF);
+        const ar = (isNum(sp.area) ? sp.area : 0) * fToNumber(f);
+        r.area += ar;
+        r.byScope[sp.scope] = r.byScope[sp.scope] || { area: 0, value: 0 };
+        r.byScope[sp.scope].area += ar; r.byScope[sp.scope].value += fToNumber(valF);
+        const ak = sp.agri || 'بدون';
+        r.byAgri[ak] = r.byAgri[ak] || { area: 0, value: 0 };
+        r.byAgri[ak].area += ar; r.byAgri[ak].value += fToNumber(valF);
+        if (sp.special) r.specialValueF = fAdd(r.specialValueF, valF);
+        r.parcels.push({ id, name: sp.name, fraction: fToNumber(f), fractionFrac: fText(f), pct: fPct(f, 4), value: fToNumber(valF), valueF: valF, area: ar });
+      });
+      used[id] = sum;
+      if (fCmp(sum, F1()) > 0) {
+        over.push({ id, name: sp.name, sum, extra: fSub(sum, F1()) });
+        errors.push(`مجموع سهم‌های زمین «${sp.name}» ${fPct(sum, 4)}٪ است (بیش از ۱۰۰٪ — ${fPct(fSub(sum, F1()), 4)}٪ اضافه)`);
+      } else if (fSign(sum) < 0) errors.push(`مجموع سهم‌های زمین «${sp.name}» منفی است`);
+      else if (fCmp(sum, F1()) < 0) {
+        const rem = fSub(F1(), sum);
+        under.push({ id, name: sp.name, remaining: rem, value: fMul(totalF, rem) });
+      }
+    });
+    if (orphan.length) errors.push('سهم‌هایی به اشخاص حذف‌شده تعلق دارند و در جمع لحاظ نشدند (' + orphan.length + ' مورد) — آن‌ها را پاک یا شخص را دوباره ثبت کنید.');
+
+    const unallocated = under.map(u => ({
+      id: u.id, name: u.name, remaining: fToNumber(u.remaining),
+      remainingPct: fPct(u.remaining, 4), remainingFrac: fText(u.remaining),
+      value: Math.round(fToNumber(fMul(sc.parcels[u.id].total != null ? frac(Math.round(sc.parcels[u.id].total)) : F0(), u.remaining))),
+      valueF: u.value,
+    }));
+    // ارزش واگذارنشده (دقیق) برای کنترل تراز
+    let unallocatedF = F0();
+    under.forEach(u => { unallocatedF = fAdd(unallocatedF, u.value); });
+
+    // جمع‌های دقیق (پیش از گردکردن نمایشی) برای کنترل تراز
+    let recvTotal = F0(), entTotal = F0();
+    res.forEach(r => { recvTotal = fAdd(recvTotal, r.receivedF); entTotal = fAdd(entTotal, r.entitledF); });
+
+    // گردکردن فقط برای نمایش
+    res.forEach(r => {
+      const diffF = fSub(r.receivedF, r.entitledF);
+      r.entitledExact = fToNumber(r.entitledF); r.receivedExact = fToNumber(r.receivedF); r.diffExact = fToNumber(diffF);
+      r.entitled = Math.round(r.entitledExact);
+      r.received = Math.round(r.receivedExact);
+      r.diff = Math.round(r.diffExact);
+      r.diffFrac = fText(diffF);
+      r.entitledFracText = fText(r.entitledShare);
+      r.entitledPct = fPct(r.entitledShare, 4);
+      r.diffPct = fSign(r.entitledF) !== 0 ? fToNumber(fDiv(diffF, r.entitledF)) * 100 : 0;
+      r.specialValue = Math.round(fToNumber(r.specialValueF));
+      // اگر گردکردنِ نمایشی با اختلاف دقیق یکی نباشد، همان مقدار دقیق ملاک است
+      if (r.received - r.entitled !== r.diff) r.diffNote = 'اختلاف دقیق: ' + fNum(diffF, 2) + ' تومان (نمایش گردشده)';
+      delete r.weightFrac; delete r.entitledF; delete r.receivedF; delete r.specialValueF;
+      r.parcels.forEach(q => { q.value = Math.round(q.value); delete q.valueF; });
+      Object.keys(r.byScope).forEach(k => { r.byScope[k].value = Math.round(r.byScope[k].value); });
+      Object.keys(r.byAgri).forEach(k => { r.byAgri[k].value = Math.round(r.byAgri[k].value); });
+    });
+
+    /* کنترل‌های درستی محاسبه (همیشه اجرا می‌شوند) */
+    const pool = fToNumber(poolF);
+    const checks = [
+      {
+        id: 'no_over', ok: over.length === 0,
+        msg: over.length === 0 ? 'هیچ زمینی بیش از ۱۰۰٪ واگذار نشده است'
+          : 'واگذاری بیش از ۱۰۰٪: ' + over.map(o => o.name + ' (' + fPct(o.sum, 4) + '٪)').join('، '),
+      },
+      {
+        id: 'full', ok: under.length === 0,
+        msg: under.length === 0 ? 'جمع سهم‌های همه‌ی زمین‌ها دقیقاً ۱۰۰٪ است'
+          : 'سهم واگذارنشده: ' + under.map(u => u.name + ' (' + fPct(u.remaining, 4) + '٪ ≈ ' + Math.round(fToNumber(u.value)).toLocaleString('en') + ' تومان)').join('، '),
+      },
+      {
+        id: 'known_persons', ok: orphan.length === 0,
+        msg: orphan.length === 0 ? 'همه‌ی سهم‌ها به اشخاص ثبت‌شده تعلق دارند' : orphan.length + ' سهم به شخص حذف‌شده تعلق دارد',
+      },
+      {
+        id: 'value_balance', ok: fEq(fAdd(recvTotal, unallocatedF), poolF),
+        msg: 'مجموع ارزش دریافتی (' + Math.round(fToNumber(recvTotal)).toLocaleString('en') + ') + واگذارنشده (' + Math.round(fToNumber(unallocatedF)).toLocaleString('en') + ') = ارزش کل (' + Math.round(pool).toLocaleString('en') + ') — بدون خطای گردکردن',
+      },
+      {
+        id: 'entitled_balance', ok: fSign(wSum) > 0 && fEq(entTotal, poolF),
+        msg: fSign(wSum) > 0 ? 'مجموع حق اشخاص = ارزش کل مجموعه (' + Math.round(pool).toLocaleString('en') + ' تومان)' : 'وزنی ثبت نشده است',
+      },
+      {
+        id: 'totals_ready', ok: incomplete.length === 0,
+        msg: incomplete.length === 0 ? 'همه‌ی زمین‌های سناریو ارزش قطعی دارند' : incomplete.length + ' زمین ارزش قطعی ندارد: ' + incomplete.join('، '),
+      },
+    ];
+    const exact = {
+      poolFrac: fText(poolF), allocatedFrac: fText(allocatedF), unallocatedFrac: fText(unallocatedF),
+      sums: poolIds.map(id => ({ id, name: sc.parcels[id].name, sum: fText(used[id]), pct: fPct(used[id], 4), full: fEq(used[id], F1()) })),
+      weights: persons.map((p, i) => ({ id: p.id, name: p.name, weight: fText(wFs[i]), share: fText(fSign(wSum) > 0 ? fDiv(wFs[i], wSum) : F0()), pct: fSign(wSum) > 0 ? fPct(fDiv(wFs[i], wSum), 4) : '0' })),
+      weightSum: fText(wSum),
+    };
+    return { pool: Math.round(pool), poolExact: pool, results: res, unallocated, over, orphan, errors, checks, exact };
   }
 
   /* ---------------------------------------------------------------- */
   return {
     setProj4, normDigits, toNum, uid, nowIso, clone,
+    // کسر دقیق
+    frac, isFrac, toFrac, fPack, fAdd, fSub, fMul, fDiv, fNeg, fAbs, fCmp, fEq, fSign, fToNumber,
+    fText, fMixed, fPct, fNum, parseShare,
     CRS_LIST, detectCRS, sniffCrsText, toWGS84,
-    areaM2, validateRing, openRing,
+    areaM2, validateRing, openRing, localPlane,
+    // برش زمین با خط مستقیم (تقسیم به دو قسمت با متراژ مشخص)
+    splitAxes, splitPrepare, splitOffsetRange, splitByArea, splitByOffset, splitRingByArea, principalAzimuth,
     splitDelimited, importTable, importText, importGeoJSON, importKML, buildPreview,
     SCOPES, GRADES, AGRI, FARM, RES, URBAN_USES, METHODS,
     defaultSettings, cellKey, suggestRuralGrade, featureScore, valuate, applyValuation, newParcel,
     newState, addParcel, saveParcel, updateSettings,
-    addPerson, createScenario, setAllocation, evaluateScenario,
+    addPerson, setPersonWeight, personWeightFrac, createScenario,
+    setAllocation, setEqualAllocation, allocFrac, allocSum, evaluateScenario,
   };
 });

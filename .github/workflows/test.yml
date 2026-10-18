@@ -1,0 +1,23 @@
+name: Tests
+
+# آزمون‌های خودکار: محاسبه‌های هسته (کسر دقیق، ارزش‌گذاری، برش زمین با متراژ مشخص)،
+# رابط وب در DOM (بدون مرورگر) و الگوریتم تشخیص مرز.
+on:
+  push: { branches: [main] }
+  pull_request: {}
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci
+      - name: آزمون‌های عددی هسته
+        run: npm test
+      - name: آزمون رابط وب در DOM
+        run: npm run test:dom
+      - name: آزمون الگوریتم تشخیص مرز
+        run: npm run test:detect
