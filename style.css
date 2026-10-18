@@ -28,8 +28,18 @@ main{flex:1 1 auto;min-height:0;position:relative}
 #search-results .msg{cursor:default;color:var(--mut)}
 #map-banner{position:absolute;z-index:1000;bottom:34px;inset-inline-start:10px;inset-inline-end:10px;background:#fff3d6;border:1px solid #e0b24d;color:#5b3d00;padding:8px 12px;border-radius:8px;line-height:1.7}
 #draw-bar{position:absolute;z-index:1000;bottom:34px;inset-inline-start:50%;transform:translateX(50%);background:#fff;border-radius:10px;padding:8px 12px;box-shadow:0 2px 8px rgba(0,0,0,.35);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-#draw-bar[hidden],#map-banner[hidden],#import-panel[hidden]{display:none}
-#import-panel{position:absolute;z-index:1100;top:56px;bottom:30px;inset-inline-end:10px;width:400px;max-width:calc(100% - 20px);background:#fff;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.4);overflow:auto;padding:12px}
+#draw-bar[hidden],#map-banner[hidden],#import-panel[hidden],#split-panel[hidden],#gps-panel[hidden]{display:none}
+#import-panel,#split-panel{position:absolute;z-index:1100;top:56px;bottom:30px;inset-inline-end:10px;width:400px;max-width:calc(100% - 20px);background:#fff;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.4);overflow:auto;padding:12px}
+/* ابزار تقسیم زمین به دو قسمت با متراژ مشخص */
+#split-panel .row{margin:6px 0}
+#split-panel input[type=range]{-webkit-appearance:none;appearance:none;height:26px;background:transparent}
+#split-panel input[type=range]::-webkit-slider-runnable-track{height:6px;background:#dfe6d6;border-radius:4px}
+#split-panel input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;margin-top:-7px;border-radius:50%;background:var(--pri);border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+#split-panel input[type=range]::-moz-range-track{height:6px;background:#dfe6d6;border-radius:4px}
+#split-panel input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:var(--pri);border:2px solid #fff}
+table.t.kv td:first-child{text-align:start;color:var(--mut);width:52%}
+table.t.kv td:last-child{text-align:start;font-weight:600}
+.split-handle{width:30px;height:30px;border-radius:50%;background:#d32f2f;color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.5);cursor:grab}
 .vtx{width:14px;height:14px;background:#fff;border:3px solid #1565c0;border-radius:50%;box-shadow:0 0 2px #000}
 .vtx.sel{background:#ffca28;border-color:#e65100}
 .vtx.first{border-color:#2e7d32}
@@ -43,8 +53,8 @@ h3{margin:14px 0 6px;font-size:15px}
 .sec>h4{margin:0 0 8px;font-size:14px;display:flex;align-items:center;gap:8px}
 .sec>h4 .n{background:var(--pri);color:#fff;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:12px}
 .sec>h4 small{color:var(--mut);font-weight:400}
-label.f{display:block;margin:6px 0}
-label.f>span{display:block;color:var(--mut);font-size:12px;margin-bottom:2px}
+label.f,div.f{display:block;margin:6px 0}
+label.f>span,div.f>span{display:block;color:var(--mut);font-size:12px;margin-bottom:2px}
 input[type=text],input[type=search],input[type=number],select,textarea{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:#fff}
 textarea{min-height:70px;resize:vertical}
 input:focus,select:focus,textarea:focus{outline:2px solid #9fd69b;border-color:var(--pri)}

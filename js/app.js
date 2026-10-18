@@ -31,6 +31,8 @@
   App.toman = (x) => x == null ? '—' : App.n(Math.round(x), 0) + ' تومان';
   App.area = (m2) => (m2 == null || !isFinite(m2)) ? '—' : App.n(m2, 1) + ' مترمربع' + (m2 >= 1000 ? ' (' + App.n(m2 / 10000, 3) + ' هکتار)' : '');
   App.num = (s) => { const t = String(s == null ? '' : s).trim(); if (t === '') return null; return C.toNum(t); };
+  /** فارسی‌کردن رقم‌ها و جداکننده‌ی اعشار یک رشته (برای کسرها و درصدهای دقیقی که هسته می‌سازد) */
+  App.fa = (s) => String(s == null ? '' : s).replace(/[0-9]/g, d => '۰۱۲۳۴۵۶۷۸۹'[+d]).replace(/\./g, '٫');
   App.fmtDate = (iso) => { try { return new Date(iso).toLocaleString('fa-IR'); } catch (e) { return iso || ''; } };
   App.esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 

@@ -6,6 +6,9 @@
   "scripts": {
     "start": "python3 -m http.server 8765",
     "test": "node test.js",
+    "test:dom": "node dom-test.js",
+    "test:detect": "node detect-test.js",
+    "test:all": "node test.js && node dom-test.js && node detect-test.js",
     "test:e2e": "node e2e.js && node detect-test.js && node e2e-detect.js",
     "build:www": "rm -rf www && mkdir www && cp -r index.html style.css core.js detect.js sw.js manifest.webmanifest icons vendor js www/",
     "android:sync": "npm run build:www && npx cap sync android",

@@ -238,6 +238,7 @@
       bar.appendChild(el('span', { class: 'note', text: 'نقاط را بکشید؛ مربع‌های کوچک وسط ضلع‌ها نقطه‌ی تازه می‌افزایند؛ کلیک راست روی نقطه آن را حذف می‌کند.' }));
       bar.appendChild(el('button', { class: 'btn sm sec2', text: 'حذف نقطه‌ی انتخابی', onclick: () => removePoint(D.sel) }));
       bar.appendChild(el('button', { class: 'btn sm sec2', text: 'ویرایش دقیق نقاط', onclick: () => M.pointsEditor() }));
+      if (D.pts.length >= 3 && App.split) bar.appendChild(el('button', { class: 'btn sm sec2', text: '✂️ تقسیم با متراژ مشخص', title: 'تقسیم این زمین به دو قسمت با متراژ مشخص', onclick: () => App.split.openCurrent() }));
       if (D.source === 'auto' && App.detect) App.detect.bar(bar);
       bar.appendChild(el('button', { class: 'btn sm', id: 'focus-toggle', text: M.focused ? '✔ تأیید و بازگشت به فرم' : '⛶ نقشه‌ی تمام‌صفحه', onclick: () => M.focus(!M.focused) }));
     }

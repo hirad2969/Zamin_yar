@@ -37,10 +37,20 @@
     if (v == null || !isFinite(v) || v <= 0) return null;
     return AD.hint.unit === 'ha' ? v * 10000 : v;
   }
-  function waiting() {
+  function waiting(extra) {
     say([el('b', { text: '🎯 مرکز زمین را لمس کنید' }), hintInput(),
-      el('span', { class: 'note', text: 'اگر رنگ زمین با اطرافش فرق کمی دارد، متراژ تقریبی را بنویسید تا مرز روی خطوط کمرنگ هم بنشیند.' }),
+      el('span', { class: 'note', text: 'متراژ را می‌دانید؟ عدد را در کادر «متراژ تخمینی» بنویسید تا مرز با همان مساحت ساخته شود و روی خطوط کمرنگ هم بنشیند. متراژ را نمی‌دانید؟ کادر را خالی بگذارید و با GPS (دور زدن) یا ترسیم دستی اندازه بگیرید.' }),
+      extra || null,
       el('button', { class: 'btn sm sec2', text: 'انصراف', onclick: () => AD.cancel() })]);
+  }
+  /** وقتی مرز روی عکس هیچ نشانه‌ای ندارد: راه‌حل دقیق‌تر، برش با متراژ مشخص است */
+  function splitHint() {
+    const has = M.D.pts.length >= 3;
+    return el('span', { class: 'note' }, [
+      has ? 'مرز کل زمین را دارید؟ ' : 'اگر مرز کل زمین را بکشید یا وارد کنید، ',
+      el('button', { class: 'btn sm sec2', text: '✂️ تقسیم به دو قسمت با متراژ مشخص', disabled: has ? null : true, onclick: () => { AD.cancel(true); App.split.openCurrent(); } }),
+      has ? ' خط جداکننده را دقیقاً سر متراژ درست می‌کشد.' : ' می‌توانید یک قسمت را با متراژ مشخص از آن جدا کنید.',
+    ]);
   }
   AD.cancel = function (silent) {
     if (!AD.active && !busy) return;
@@ -104,13 +114,13 @@
     } catch (e) {
       busy = false;
       const msg = /cors/.test(e.message) ? 'سرویس نقشه اجازه‌ی خواندن تصویر برای تحلیل را نداد.' : /tiles/.test(e.message) ? 'کاشی‌های نقشه بارگذاری نشد (اینترنت یا سرویس نقشه در دسترس نیست). تشخیص خودکار نیازمند اینترنت است.' : 'خطا در تحلیل: ' + e.message;
-      App.toast(msg, 'err'); waiting(); return;
+      App.toast(msg, 'err'); waiting(splitHint()); return;
     }
     busy = false;
     const r = last.r;
     if (!r.ok) {
-      App.toast(r.reason === 'small' ? 'ناحیه‌ی همرنگ اطراف این نقطه خیلی کوچک است. نقطه‌ی دیگری از داخل زمین را لمس کنید یا مرز را دستی بکشید.' : 'مرز مشخصی تشخیص داده نشد. مرز را دستی بکشید.', 'warn');
-      waiting(); return;
+      App.toast(r.reason === 'small' ? 'ناحیه‌ی همرنگ اطراف این نقطه خیلی کوچک است. نقطه‌ی دیگری از داخل زمین را لمس کنید یا مرز را دستی بکشید.' : 'مرز مشخصی تشخیص داده نشد. اگر مرز روی عکس نشانه‌ای ندارد، مرز کل زمین را بکشید و با «تقسیم به دو قسمت با متراژ مشخص» قسمت موردنظر را جدا کنید.', 'warn');
+      waiting(splitHint()); return;
     }
     AD.st = { latlng, z: last.z, g: last.g, det: last.det, level: r.level, est: last.est, targetPx: last.targetPx, mpp: last.mpp, mode: last.est ? 'area' : 'level' };
     apply(r, true);
