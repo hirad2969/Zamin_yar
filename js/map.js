@@ -11,7 +11,8 @@
 
   App.on('init', function () {
     const map = M.map = L.map('map', { zoomControl: true, worldCopyJump: false, doubleClickZoom: false }).setView([32.5, 54], 6);
-    const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'تصاویر ماهواره‌ای © Esri, Maxar, Earthstar Geographics' });
+    M.SAT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+    const sat = L.tileLayer(M.SAT_URL, { maxZoom: 19, attribution: 'تصاویر ماهواره‌ای © Esri, Maxar, Earthstar Geographics' });
     const street = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' });
     const blank = L.layerGroup();
     [sat, street].forEach(t => {
@@ -47,6 +48,7 @@
       if (e.key === 'Delete' && D.sel >= 0) removePoint(D.sel);
       if (e.key === 'Enter' && D.mode === 'draw') M.finishDraw();
       if (e.key === 'Escape' && D.mode === 'draw') M.finishDraw(true);
+      else if (e.key === 'Escape' && M.focused && !(App.detect && App.detect.active)) M.focus(false);
     });
     renderSaved();
   });
@@ -176,31 +178,48 @@
       bar.appendChild(el('span', { class: 'note', text: 'نقاط را بکشید؛ مربع‌های کوچک وسط ضلع‌ها نقطه‌ی تازه می‌افزایند؛ کلیک راست روی نقطه آن را حذف می‌کند.' }));
       bar.appendChild(el('button', { class: 'btn sm sec2', text: 'حذف نقطه‌ی انتخابی', onclick: () => removePoint(D.sel) }));
       bar.appendChild(el('button', { class: 'btn sm sec2', text: 'ویرایش دقیق نقاط', onclick: () => M.pointsEditor() }));
+      if (D.source === 'auto' && App.detect) App.detect.bar(bar);
+      bar.appendChild(el('button', { class: 'btn sm', id: 'focus-toggle', text: M.focused ? '✔ تأیید و بازگشت به فرم' : '⛶ نقشه‌ی تمام‌صفحه', onclick: () => M.focus(!M.focused) }));
     }
     bar.appendChild(el('button', { class: 'btn sm dng', text: 'پاک‌کردن مرز', onclick: () => M.clearBoundary() }));
   }
 
   M.startDraw = function () {
     if (D.pts.length && D.mode !== 'draw') { if (!window.confirm('مرز فعلی پاک شود و ترسیم تازه آغاز شود؟')) return; }
+    if (App.detect) App.detect.cancel(true);
     D.pts = []; D.sel = -1; D.mode = 'draw'; D.source = 'draw'; D.meta = null;
+    M.focus(true);
     clearPreview(); redraw(); changed();
     M.map.getContainer().style.cursor = 'crosshair';
   };
   M.finishDraw = function (cancel) {
     M.map.getContainer().style.cursor = '';
-    if (D.pts.length < 3) { if (!cancel) App.toast('برای مرز حداقل ۳ نقطه لازم است.', 'warn'); D.mode = D.pts.length ? 'draw' : 'idle'; if (cancel) { D.mode = 'idle'; } redraw(); return; }
+    if (D.pts.length < 3) { if (!cancel) App.toast('برای مرز حداقل ۳ نقطه لازم است.', 'warn'); D.mode = D.pts.length ? 'draw' : 'idle'; if (cancel) { D.mode = 'idle'; } if (D.mode === 'idle') M.focus(false); redraw(); return; }
     D.mode = 'edit'; redraw(); changed();
     const v = M.getBoundary(); if (!v.valid) App.toast('مرز نامعتبر است: ' + v.errors[0], 'err');
   };
   M.clearBoundary = function () {
+    if (App.detect) App.detect.cancel(true);
     D.pts = []; D.sel = -1; D.mode = 'idle'; D.meta = null; M.map.getContainer().style.cursor = '';
+    M.focus(false);
     redraw(); changed();
+  };
+  /** حالت تمام‌صفحه: منوها و پنل کناری پنهان می‌شوند تا نقشه بزرگ‌تر شود */
+  M.focused = false;
+  M.focus = function (on) {
+    M.focused = !!on;
+    document.body.classList.toggle('map-focus', M.focused);
+    const b = document.getElementById('focus-toggle'); if (b) b.textContent = M.focused ? '✔ تأیید و بازگشت به فرم' : '⛶ نقشه‌ی تمام‌صفحه';
+    if (M.map) M.map.invalidateSize({ animate: false }); // همگام: کلیک‌های بعدی با اندازه‌ی درست حساب شوند
+    setTimeout(() => { if (M.map) M.map.invalidateSize(); }, 80);
+    setTimeout(() => { if (M.map) M.map.invalidateSize(); }, 400);
   };
   /** مرز موجود را (برای ویرایش) روی نقشه بگذار */
   M.setBoundary = function (ring, o) {
     o = o || {};
     D.pts = ring ? C.openRing(ring).map(p => [p[0], p[1]]) : [];
     D.sel = -1; D.mode = D.pts.length ? 'edit' : 'idle'; D.source = o.source || 'draw'; D.meta = o.meta || null;
+    if (!D.pts.length && M.focused && !(App.detect && App.detect.active)) M.focus(false);
     redraw();
     if (D.pts.length && o.fit !== false) M.map.fitBounds(L.latLngBounds(D.pts.map(ll)), { maxZoom: 18, padding: [40, 40] });
     changed();

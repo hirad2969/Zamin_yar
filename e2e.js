@@ -141,6 +141,9 @@ const near = (a, b, t, m) => { if (!isFinite(a) || Math.abs(a - b) > t) throw ne
     await page.waitForTimeout(200);
     const after = await page.evaluate(() => JSON.stringify(App.map.getBoundary().ring));
     ok(before !== after, 'رأس با ماوس جابه‌جا نشد');
+    ok(await page.evaluate(() => document.body.classList.contains('map-focus')), 'ترسیم باید تمام‌صفحه باشد');
+    await page.click('#focus-toggle'); // بازگشت به فرم
+    ok(await page.evaluate(() => !document.body.classList.contains('map-focus')), 'بازگشت به فرم کار نکرد');
     await page.click('.choice:has-text("اطراف روستا")');
     await page.selectOption('#form-root select >> nth=1', 'grade2');
     await page.fill('#f-name', 'ترسیمی');

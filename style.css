@@ -102,6 +102,11 @@ details>summary{cursor:pointer;color:var(--pri2);font-weight:700;margin:4px 0}
 
 #gps-panel{position:absolute;z-index:1100;top:56px;bottom:30px;inset-inline-end:10px;width:400px;max-width:calc(100% - 20px);background:#fff;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.4);overflow:auto;padding:12px}
 #gps-panel[hidden]{display:none}
+/* ---- حالت تمام‌صفحه‌ی نقشه (هنگام ترسیم/ویرایش مرز) ---- */
+body.map-focus header.top,body.map-focus #side,body.map-focus #maptools{display:none}
+body.map-focus #mapwrap{flex:1 1 auto}
+#detect-bar{position:absolute;z-index:1000;bottom:34px;inset-inline-start:50%;transform:translateX(50%);background:#fff;border-radius:10px;padding:8px 12px;box-shadow:0 2px 8px rgba(0,0,0,.35);display:flex;gap:8px;align-items:center;flex-wrap:wrap;max-width:calc(100% - 20px)}
+#detect-bar[hidden]{display:none}
 /* ---- موبایل ---- */
 @media (max-width:900px){
   body{font-size:15px}
@@ -119,6 +124,8 @@ details>summary{cursor:pointer;color:var(--pri2);font-weight:700;margin:4px 0}
   #maptools{inset-inline-start:8px;inset-inline-end:56px;top:8px}
   #search-q{padding:9px}
   #import-panel,#gps-panel{position:fixed;z-index:2000;inset-inline-start:0;inset-inline-end:0;width:auto;max-width:none;top:auto;bottom:0;max-height:50dvh;border-radius:14px 14px 0 0;padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+  body.map-focus #mapwrap{flex:1 1 auto;height:auto}
+  #detect-bar{inset-inline-start:8px;inset-inline-end:8px;transform:none;bottom:28px;font-size:13px}
   #draw-bar{inset-inline-start:8px;inset-inline-end:8px;transform:none;bottom:28px;font-size:13px}
   #map-banner{font-size:12px;bottom:28px;padding:6px 8px;max-height:30%;overflow:auto}
   .page{padding:10px}

@@ -49,6 +49,7 @@
     if (App.importer && document.getElementById('import-panel') && !document.getElementById('import-panel').hidden) App.importer.close();
     if (M.D.pts.length >= 3 && !window.confirm('مرز فعلی با مرز GPS جایگزین می‌شود (تا زمانی که پایان ندهید دست‌نخورده می‌ماند). ادامه؟')) return;
     initLayer();
+    M.focus(true);
     G.st = { mode: 'corner', pts: [], accs: [], pos: null, paused: false, running: false, sampling: null, maxAcc: 15, minDist: 4, sampleSec: 6, watchId: null, wake: null, err: null, fixes: 0 };
     render();
     start();
@@ -67,6 +68,7 @@
     clearInterval(timer); timer = null;
     if (!keepLayer && layer) { layer.clearLayers(); meMark = meCircle = track = shape = null; vmarks = []; }
     G.st = null; panel().hidden = true;
+    M.focus(false);
   }
   G.close = () => stop(false);
 

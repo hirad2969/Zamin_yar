@@ -1,9 +1,9 @@
 /* سرویس‌ورکر: برنامه بدون اینترنت باز می‌شود؛ کاشی‌های نقشه‌ی دیده‌شده هم ذخیره می‌شوند */
-const VER = 'zy-v1';
+const VER = 'zy-v2';
 const SHELL = ['./', 'index.html', 'style.css', 'core.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
   'vendor/leaflet.js', 'vendor/leaflet.css', 'vendor/proj4.js', 'vendor/xlsx.full.min.js', 'vendor/jszip.min.js',
   'vendor/images/marker-icon.png', 'vendor/images/marker-icon-2x.png', 'vendor/images/marker-shadow.png', 'vendor/images/layers.png', 'vendor/images/layers-2x.png',
-  'js/app.js', 'js/map.js', 'js/importer.js', 'js/gps.js', 'js/form.js', 'js/parcels.js', 'js/settings.js', 'js/people.js', 'js/project.js'];
+  'js/app.js', 'js/map.js', 'detect.js', 'js/autodetect.js', 'js/importer.js', 'js/gps.js', 'js/form.js', 'js/parcels.js', 'js/settings.js', 'js/people.js', 'js/project.js'];
 const TILE = /(arcgisonline\.com|tile\.openstreetmap\.org)/;
 const MAX_TILES = 1500;
 
@@ -16,6 +16,7 @@ self.addEventListener('fetch', (e) => {
   const req = e.request; if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (TILE.test(url.hostname)) {
+    if (req.mode === 'cors') return; // درخواست تحلیل تصویر: مستقیم از شبکه (پاسخ opaque ذخیره‌شده برای canvas بی‌فایده است)
     e.respondWith(caches.open('zy-tiles').then(async (c) => {
       const hit = await c.match(req); if (hit) return hit;
       try { const r = await fetch(req); if (r && (r.ok || r.type === 'opaque')) { c.put(req, r.clone()); trim(c); } return r; }

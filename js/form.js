@@ -102,6 +102,7 @@
     r.appendChild(section(1, 'موقعیت و مرز زمین', 'از روی نقشه', [
       el('div', { class: 'note', text: 'محل را با جست‌وجوی نام یا مختصات (کادر بالای نقشه) پیدا کنید؛ سپس مرز را ترسیم کنید یا مختصات آماده را وارد کنید.' }),
       el('div', { class: 'row', style: 'margin:6px 0' }, [
+        el('button', { class: 'btn', text: '🎯 تشخیص خودکار مرز (لمس مرکز زمین)', onclick: () => App.detect.start() }),
         el('button', { class: 'btn', text: '✏️ ترسیم مرز روی نقشه', onclick: () => M.startDraw() }),
         el('button', { class: 'btn', text: '📥 ورود مختصات آماده', onclick: () => App.importer.open() }),
         el('button', { class: 'btn', text: '📍 اندازه‌گیری با GPS (پیاده‌روی)', onclick: () => App.gps.open() }),
