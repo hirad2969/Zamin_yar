@@ -94,6 +94,13 @@
         el('button', { class: 'btn sm sec2', text: '＋ زمین جدید', onclick: () => F.newParcel() }),
       ]),
       field('نام یا شناسه‌ی زمین (اختیاری)', el('input', { type: 'text', id: 'f-name', value: p.name, placeholder: 'مثلاً «باغ شرقی»', oninput: (e) => { p.name = e.target.value; touch(); refreshLight(); } })),
+      field('دسته‌ی اموال (برای تقسیم)', (() => {
+        const list = S().estates || [];
+        const sel = el('select', { id: 'f-estate' }, [el('option', { value: '', text: C.NO_ESTATE_NAME })].concat(list.map(e => el('option', { value: e.id, text: e.name }))));
+        sel.value = p.estateId || '';
+        sel.addEventListener('change', () => { p.estateId = sel.value || null; touch(); });
+        return el('div', null, [sel, el('div', { class: 'note', text: list.length ? 'سهم هر شخص از این دسته در تب «اشخاص و تقسیم» تعیین می‌شود.' : 'هنوز دسته‌ای نساخته‌اید؛ در تب «اشخاص و تقسیم» می‌توانید دسته‌هایی مثل «اموال پدری» یا «اموال دره‌گرمی» بسازید.' })]);
+      })()),
       el('div', { id: 'f-top', class: 'note' }),
     ]));
 

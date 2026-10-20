@@ -5,6 +5,15 @@
   const root = () => document.getElementById('parcels-root');
   let filter = 'all';
 
+  /* انتخاب دسته‌ی اموال (برای تقسیم چندمنبعی) */
+  function estateSelect(value, onchange) {
+    const list = App.S.estates || [];
+    const s = el('select', { style: 'min-width:120px' }, [el('option', { value: '', text: C.NO_ESTATE_NAME })].concat(list.map(e => el('option', { value: e.id, text: e.name }))));
+    s.value = value || '';
+    s.addEventListener('change', () => onchange(s.value || null));
+    return s;
+  }
+
   function render() {
     const r = root(); r.innerHTML = '';
     const list = App.S.parcels.filter(p => filter === 'all' || p.scope === filter);
@@ -18,7 +27,7 @@
     const v = App.S.settings.version;
     const sum = list.reduce((s, p) => s + ((p.valuation && p.valuation.total) || 0), 0);
     const sumArea = list.reduce((s, p) => s + ((p.valuation && p.valuation.area) || 0), 0);
-    const th = ['نام', 'محدوده', 'نوع/کاربری', 'درجه', 'ویژه', 'مساحت (م²)', 'قیمت هر م²', 'ارزش کل', 'وضعیت', 'نسخه‌ی قیمت', ''];
+    const th = ['نام', 'دسته‌ی اموال', 'محدوده', 'نوع/کاربری', 'درجه', 'ویژه', 'مساحت (م²)', 'قیمت هر م²', 'ارزش کل', 'وضعیت', 'نسخه‌ی قیمت', ''];
     r.appendChild(el('div', { class: 'scroll' }, el('table', { class: 't' }, [
       el('thead', null, el('tr', null, th.map(h => el('th', { text: h })))),
       el('tbody', null, list.map(p => {
@@ -26,7 +35,9 @@
         const typ = p.scope === 'rural_inside' ? (C.RES[p.attrs.residential] || '') + ' / ' + (C.AGRI[p.attrs.agri] || '') : p.scope === 'rural_outside' ? C.FARM[p.attrs.farmType] : C.URBAN_USES[p.attrs.urbanUse];
         const old = va.settingsVersion != null && va.settingsVersion !== v;
         return el('tr', null, [
-          el('td', { class: 'l', text: p.name || '—' }), el('td', { text: C.SCOPES[p.scope] }), el('td', { class: 'l', text: typ }),
+          el('td', { class: 'l', text: p.name || '—' }),
+          el('td', null, estateSelect(p.estateId, (v) => { C.setParcelEstate(App.S, p.id, v, false); App.save(); render(); })),
+          el('td', { text: C.SCOPES[p.scope] }), el('td', { class: 'l', text: typ }),
           el('td', { text: p.scope === 'urban' ? '—' : (C.GRADES[p.grade] || 'دستی؟') }), el('td', { text: p.special ? 'ویژه' : 'معمولی' }),
           el('td', { text: App.n(va.area, 1) }), el('td', { text: App.n(va.pricePerM2, 0) }), el('td', { text: App.n(va.total, 0) }),
           el('td', { html: '<span class="tag ' + (va.status === 'قطعی' ? 'final' : va.status === 'موقت' ? 'prov' : 'inc') + '">' + (va.status || 'ناقص') + '</span>' }),
@@ -40,8 +51,20 @@
           ])),
         ]);
       })),
-      el('tfoot', null, el('tr', null, [el('th', { class: 'l', colspan: 5, text: 'جمع (' + App.n(list.length, 0) + ' زمین)' }), el('th', { text: App.n(sumArea, 1) }), el('th'), el('th', { text: App.n(sum, 0) }), el('th', { colspan: 3 })])),
+      el('tfoot', null, el('tr', null, [el('th', { class: 'l', colspan: 6, text: 'جمع (' + App.n(list.length, 0) + ' زمین)' }), el('th', { text: App.n(sumArea, 1) }), el('th'), el('th', { text: App.n(sum, 0) }), el('th', { colspan: 3 })])),
     ])));
+    if ((App.S.estates || []).length) {
+      let bulk = '';
+      const bs = estateSelect('', (v) => { bulk = v; });
+      r.appendChild(el('div', { class: 'row', style: 'margin:8px 0' }, [
+        el('span', { class: 'note', text: 'انتساب گروهی دسته‌ی اموال به ' + App.n(list.length, 0) + ' زمین نمایش‌داده‌شده:' }), bs,
+        el('button', { class: 'btn sm sec2', text: 'اعمال روی همه‌ی زمین‌های این فهرست', onclick: () => App.confirm('انتساب دسته', 'دسته‌ی «' + App.esc(bulk ? ((App.S.estates.find(e => e.id === bulk) || {}).name || '') : C.NO_ESTATE_NAME) + '» به ' + App.n(list.length, 0) + ' زمین نمایش‌داده‌شده داده شود؟', () => {
+          list.forEach(p => C.setParcelEstate(App.S, p.id, bulk || null, false));
+          App.save(); App.emit('state'); render();
+        }, 'اعمال') }),
+      ]));
+    }
+    r.appendChild(el('div', { class: 'note', text: 'ستون «دسته‌ی اموال» تعیین می‌کند هر زمین جزو کدام منبع تقسیم است (مثلاً «اموال پدری» یا «اموال دره‌گرمی»)؛ سهم اشخاص در هر دسته در تب «اشخاص و تقسیم» تعریف می‌شود.' }));
     r.appendChild(el('div', { class: 'note', text: 'قیمت زمین‌ها مادامی که اجازه ندهید با تغییر تنظیمات عوض نمی‌شود. «قدیمی» یعنی با نسخه‌ی قبلی تنظیمات قیمت‌گذاری شده است. ارزش‌ها بر اساس تنظیمات خودتان‌اند و منبع بازار یا قانونی ندارند.' }));
   }
   function recalcOne(p) {
