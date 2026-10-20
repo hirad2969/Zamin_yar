@@ -132,6 +132,31 @@ body.map-focus header.top,body.map-focus #side,body.map-focus #maptools{display:
 body.map-focus #mapwrap{flex:1 1 auto}
 #detect-bar{position:absolute;z-index:1000;bottom:34px;inset-inline-start:50%;transform:translateX(50%);background:#fff;border-radius:10px;padding:8px 12px;box-shadow:0 2px 8px rgba(0,0,0,.35);display:flex;gap:8px;align-items:center;flex-wrap:wrap;max-width:calc(100% - 20px)}
 #detect-bar[hidden]{display:none}
+/* ---- دسته‌های اموال و برگه‌ی نهایی تقسیم ---- */
+table.t.mx td.l{min-width:120px}
+table.t.mx input{min-width:72px}
+table.t td .sub{display:block;color:var(--mut);font-size:11px;margin-top:2px}
+.estate-tag{display:inline-block;background:#eef0e6;border:1px solid var(--line);border-radius:10px;padding:0 8px;font-size:12px;color:var(--pri2)}
+.basis{background:#f8faf5;border:2px solid var(--pri);border-radius:10px;padding:10px;margin-bottom:10px}
+.basis .row>label.f{margin:0;min-width:150px}
+.sheet{background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px;max-height:60vh;overflow:auto}
+.sheet .person{border:1px solid var(--line);border-radius:8px;padding:8px;margin:10px 0}
+.sheet table{width:100%;border-collapse:collapse;margin:6px 0}
+.sheet th,.sheet td{border:1px solid var(--line);padding:4px 6px;text-align:center;font-size:12px}
+.sheet th{background:#eef0e6}
+.sheet td.l,.sheet th.l{text-align:start}
+.sheet .sign{margin-top:10px;display:flex;gap:24px;font-size:12px;color:var(--mut)}
+#print-root{display:none}
+@media print{
+  body.printing{display:block;background:#fff}
+  body.printing>*{display:none !important}
+  body.printing>#print-root{display:block !important}
+  body.printing #print-root table{width:100%;border-collapse:collapse}
+  body.printing #print-root th,body.printing #print-root td{border:1px solid #999;padding:4px 6px;text-align:center;font-size:12px}
+  body.printing #print-root td.l,body.printing #print-root th.l{text-align:right}
+  body.printing #print-root .person{border:1px solid #999;border-radius:8px;padding:8px;margin:10px 0;page-break-inside:avoid}
+  @page{size:A4;margin:12mm}
+}
 /* ---- موبایل ---- */
 @media (max-width:900px){
   body{font-size:15px}

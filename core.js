@@ -895,7 +895,7 @@
   function newParcel(init) {
     const t = nowIso();
     return Object.assign({
-      id: uid('land'), name: '', scope: 'rural_inside',
+      id: uid('land'), name: '', scope: 'rural_inside', estateId: null,
       geometry: null, areaComputed: null, areaOverride: null,
       attrs: { residential: 'unknown', agri: 'none', farmType: 'irrigated', urbanUse: 'residential' },
       grade: 'manual', gradeSource: 'auto', gradeReason: '', special: false, specialReason: '',
@@ -910,7 +910,7 @@
   /* ---------------------------------------------------------------- */
   function newState() {
     const s = defaultSettings();
-    return { schema: 1, settings: s, settingsHistory: [{ version: s.version, at: s.updatedAt, settings: clone(s), reason: 'نسخه‌ی اولیه' }], parcels: [], persons: [], scenarios: [], log: [] };
+    return { schema: 1, settings: s, settingsHistory: [{ version: s.version, at: s.updatedAt, settings: clone(s), reason: 'نسخه‌ی اولیه' }], parcels: [], persons: [], estates: [], scenarios: [], log: [] };
   }
   function addParcel(state, parcel) {
     applyValuation(parcel, state.settings, 'ثبت اولیه');
@@ -981,11 +981,200 @@
       snap[p.id] = {
         name: p.name, scope: p.scope, area: v.area, pricePerM2: v.pricePerM2, total: v.total, special: !!p.special,
         agri: p.scope === 'rural_outside' ? p.attrs.farmType : (p.scope === 'rural_inside' || p.attrs.urbanUse === 'agri' ? p.attrs.agri : null),
-        grade: p.grade, urbanUse: p.attrs.urbanUse, status: v.status,
+        grade: p.grade, urbanUse: p.attrs.urbanUse, status: v.status, estateId: p.estateId || null,
       };
     });
-    const sc = { id: uid('sc'), name: name || 'سناریو', createdAt: nowIso(), settingsVersion: state.settings.version, parcels: snap, allocations: {} };
+    const sc = {
+      id: uid('sc'), name: name || 'سناریو', createdAt: nowIso(), settingsVersion: state.settings.version,
+      parcels: snap, allocations: {},
+      // مبنای قیمت: پیش‌فرض همان «عکس» لحظه‌ی ساخت؛ کاربر می‌تواند زنده یا نسخه‌ی دیگری را انتخاب کند
+      priceBasis: { mode: 'snapshot', level: 'base', version: state.settings.version, factor: 1, ignoreOverride: false },
+      estates: null,   // null = همه‌ی دسته‌های اموال در محاسبه هستند
+    };
     state.scenarios.push(sc); return sc;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* دسته‌های اموال (منابع) — سهم متفاوت هر شخص در هر دسته               */
+  /* مثال: «اموال پدری» هر پسر ۱، «اموال دره‌گرمی» دو پسرِ شریک ۴/۳.      */
+  /* محاسبه‌ی مشترک = جمعِ حقِ هر نفر در همه‌ی دسته‌ها (بدون محدودیت تعداد). */
+  /* ---------------------------------------------------------------- */
+  const NO_ESTATE = '';
+  const NO_ESTATE_NAME = 'دسته‌بندی‌نشده';
+  /** شناسه‌ی دسته‌ی یک زمین (زمین بدون دسته ⇒ رشته‌ی خالی) */
+  const estateIdOf = (x) => (x && x.estateId) ? String(x.estateId) : NO_ESTATE;
+
+  function newEstate(name, note) {
+    return { id: uid('est'), name: name || 'دسته‌ی اموال', note: note || '', weights: {}, createdAt: nowIso() };
+  }
+  function addEstate(state, name, note) {
+    state.estates = state.estates || [];
+    const e = newEstate(name, note);
+    state.estates.push(e);
+    if (state.log) state.log.push({ at: nowIso(), msg: 'ثبت دسته‌ی اموال «' + e.name + '»' });
+    return e;
+  }
+  function findEstate(state, id) { return id ? ((state.estates || []).find(e => e.id === id) || null) : null; }
+  /** حذف دسته: زمین‌ها و سناریوها «دسته‌بندی‌نشده» می‌شوند (هیچ داده‌ای گم نمی‌شود) */
+  function removeEstate(state, id) {
+    state.estates = (state.estates || []).filter(e => e.id !== id);
+    (state.parcels || []).forEach(p => { if (p.estateId === id) p.estateId = null; });
+    (state.scenarios || []).forEach(sc => {
+      Object.keys(sc.parcels || {}).forEach(k => { if (sc.parcels[k].estateId === id) sc.parcels[k].estateId = null; });
+      if (Array.isArray(sc.estates)) sc.estates = sc.estates.filter(x => x !== id);
+    });
+  }
+  /** سهم نسبی یک شخص در یک دسته (کسر دقیق؛ ثبت‌نشده = صفر) */
+  function estateWeightFrac(estate, personId) {
+    if (!estate || !estate.weights) return F0();
+    const w = estate.weights[personId];
+    if (w == null || w === '') return F0();
+    const f = toFrac(w);
+    return f && fSign(f) > 0 ? f : F0();
+  }
+  /** ثبت سهم نسبی شخص در یک دسته؛ ورودی «1»، «4/3»، «۱٫۵» یا خالی/صفر برای حذف. نامعتبر ⇒ null */
+  function setEstateWeight(state, estateId, personId, weight) {
+    const e = findEstate(state, estateId);
+    if (!e) return null;
+    e.weights = e.weights || {};
+    if (weight == null || weight === '') { delete e.weights[personId]; return F0(); }
+    const f = toFrac(weight);
+    if (!f || fSign(f) < 0) return null;
+    if (fSign(f) === 0) { delete e.weights[personId]; return F0(); }
+    e.weights[personId] = fPack(f);
+    return f;
+  }
+  /** همه‌ی اشخاص با سهم برابر در یک دسته */
+  function setEstateEqualWeights(state, estateId, personIds) {
+    const e = findEstate(state, estateId);
+    if (!e) return null;
+    e.weights = {};
+    (personIds || (state.persons || []).map(p => p.id)).forEach(id => { e.weights[id] = fPack(F1()); });
+    return e.weights;
+  }
+  /**
+   * وزن مؤثر اشخاص در یک دسته:
+   * اگر برای دسته‌ای هیچ سهمی ثبت نشده باشد، از «سهم پیش‌فرض» خود اشخاص استفاده می‌شود
+   * (تا پروژه‌های قدیمی و دسته‌های تازه‌ساخته بدون تنظیم هم درست محاسبه شوند).
+   */
+  function estateWeights(state, estateId) {
+    const persons = state.persons || [];
+    const est = findEstate(state, estateId);
+    let ws = persons.map(p => estateWeightFrac(est, p.id));
+    let sum = F0(); ws.forEach(w => { sum = fAdd(sum, w); });
+    let usedDefault = false;
+    if (fSign(sum) <= 0) {
+      ws = persons.map(personWeightFrac);
+      sum = F0(); ws.forEach(w => { sum = fAdd(sum, w); });
+      usedDefault = true;
+    }
+    return { id: estateId || NO_ESTATE, name: est ? est.name : NO_ESTATE_NAME, estate: est, weights: ws, sum, usedDefault };
+  }
+  /** انتساب زمین به یک دسته (زمین اصلی و در صورت نیاز عکس سناریوها) */
+  function setParcelEstate(state, parcelId, estateId, alsoScenarios) {
+    const p = (state.parcels || []).find(x => x.id === parcelId);
+    if (p) p.estateId = estateId || null;
+    if (alsoScenarios) (state.scenarios || []).forEach(sc => { if (sc.parcels && sc.parcels[parcelId]) sc.parcels[parcelId].estateId = estateId || null; });
+    return p || null;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* مبنای قیمت سناریو: با تغییر آن، همه‌ی محاسبه‌ها دوباره انجام می‌شود   */
+  /* ---------------------------------------------------------------- */
+  const PRICE_MODES = { snapshot: 'قیمت‌های ثبت‌شده در سناریو', live: 'قیمت‌های فعلی برنامه', version: 'نسخه‌ی مشخصی از تنظیمات' };
+  const PRICE_LEVELS = { base: 'قیمت پایه‌ی هر ردیف', min: 'حداقلِ بازه', max: 'حداکثرِ بازه' };
+
+  function normBasis(b) {
+    const x = b || {};
+    const factor = (typeof x.factor === 'number' && isFinite(x.factor) && x.factor > 0) ? x.factor : 1;
+    return {
+      mode: PRICE_MODES[x.mode] ? x.mode : 'snapshot',
+      level: PRICE_LEVELS[x.level] ? x.level : 'base',
+      version: x.version == null ? null : Number(x.version),
+      factor, ignoreOverride: !!x.ignoreOverride,
+    };
+  }
+  /** تغییر مبنای قیمت سناریو (همیشه نرمال و معتبر ذخیره می‌شود) */
+  function setScenarioBasis(sc, patch) {
+    sc.priceBasis = normBasis(Object.assign({}, normBasis(sc.priceBasis), patch || {}));
+    return sc.priceBasis;
+  }
+  /** تنظیماتِ نسخه‌ی موردنظر مبنا (نسخه‌ی گم‌شده ⇒ تنظیمات فعلی + هشدار) */
+  function basisSettings(state, basis) {
+    const b = normBasis(basis);
+    if (b.mode === 'version' && b.version != null) {
+      const h = (state.settingsHistory || []).find(x => x.version === b.version);
+      if (h && h.settings) return { settings: h.settings, version: h.version, missing: false };
+      return { settings: state.settings, version: state.settings.version, missing: true };
+    }
+    return { settings: state.settings, version: state.settings.version, missing: false };
+  }
+  /**
+   * «سطح قیمت مرجع»: جدول قیمت‌ها را روی حداقل یا حداکثرِ بازه‌ی هر ردیف می‌نشاند.
+   * base ⇒ بدون تغییر. min/max ⇒ قیمت همان سطح، روش «ثابت» (تا امتیاز/بازه دوباره دخالت نکند).
+   */
+  function priceLevelSettings(settings, level) {
+    if (!level || level === 'base') return settings;
+    const s = clone(settings);
+    Object.keys(s.groups || {}).forEach(gk => {
+      const g = s.groups[gk];
+      g.method = 'fixed';
+      const fix = (cell) => { if (cell && isNum(cell[level])) cell.fixed = cell[level]; };
+      Object.keys(g.cells || {}).forEach(k => fix(g.cells[k]));
+      Object.keys(g.byType || {}).forEach(t => Object.keys(g.byType[t] || {}).forEach(k => fix(g.byType[t][k])));
+    });
+    return s;
+  }
+  /** شرح فارسی مبنای قیمت برای نمایش و برگه‌ی چاپی */
+  function basisText(state, basis) {
+    const b = normBasis(basis);
+    const bs = basisSettings(state, b);
+    let t = b.mode === 'snapshot' ? 'قیمت‌های ثبت‌شده در خود سناریو'
+      : b.mode === 'live' ? 'قیمت‌های فعلی برنامه (نسخه‌ی ' + bs.version + ' تنظیمات)'
+        : 'تنظیمات نسخه‌ی ' + bs.version;
+    if (b.mode !== 'snapshot') {
+      if (b.level !== 'base') t += ' — سطح ' + PRICE_LEVELS[b.level];
+      if (b.factor !== 1) t += ' — ضریب ' + trim0(b.factor.toFixed(4)) + '×';
+      if (b.ignoreOverride) t += ' — بدون قیمت‌های دستی';
+    }
+    return t;
+  }
+  /**
+   * قیمت و ارزش هر زمین سناریو بر پایه‌ی مبنای انتخابی.
+   * خروجی هم‌شکلِ عکسِ سناریو است تا بقیه‌ی محاسبه‌ها دست‌نخورده بماند.
+   */
+  function scenarioPrices(state, sc) {
+    const b = normBasis(sc.priceBasis);
+    const out = {};
+    if (b.mode === 'snapshot') {
+      Object.keys(sc.parcels || {}).forEach(id => { out[id] = Object.assign({}, sc.parcels[id], { priceFrom: 'snapshot' }); });
+      return out;
+    }
+    const bs = basisSettings(state, b);
+    const st = priceLevelSettings(bs.settings, b.level);
+    const rt = (st.roundTo && st.roundTo > 0) ? st.roundTo : 1;
+    Object.keys(sc.parcels || {}).forEach(id => {
+      const snap = sc.parcels[id];
+      const live = (state.parcels || []).find(p => p.id === id);
+      if (!live) { out[id] = Object.assign({}, snap, { priceFrom: 'snapshot', missingParcel: true }); return; }
+      const p2 = clone(live);
+      if (b.ignoreOverride) p2.pricing = Object.assign({}, p2.pricing || {}, { override: null });
+      const v = valuate(p2, st);
+      let price = v.price;
+      if (isNum(price) && b.factor !== 1) price = Math.round((price * b.factor) / rt) * rt;
+      const area = isNum(v.area) ? v.area : snap.area;
+      const total = (isNum(price) && isNum(area) && area > 0) ? Math.round(area * price) : null;
+      out[id] = {
+        name: live.name || snap.name, scope: live.scope, area, pricePerM2: price, total,
+        special: !!live.special,
+        agri: live.scope === 'rural_outside' ? live.attrs.farmType : (live.scope === 'rural_inside' || live.attrs.urbanUse === 'agri' ? live.attrs.agri : null),
+        grade: live.grade, urbanUse: live.attrs.urbanUse,
+        status: total == null ? 'ناقص' : v.status,
+        estateId: live.estateId || snap.estateId || null,
+        priceFrom: b.mode, priceKind: v.priceKind, settingsVersion: bs.version, level: b.level, factor: b.factor,
+      };
+    });
+    return out;
   }
   /**
    * ثبت سهم یک شخص از یک زمین با کسر دقیق.
@@ -1033,28 +1222,66 @@
    */
   function evaluateScenario(state, sc) {
     const persons = state.persons || [];
-    const poolIds = Object.keys(sc.parcels);
-    const errors = [];
+    const basis = normBasis(sc.priceBasis);
+    // قیمت هر زمین بر پایه‌ی «مبنای قیمت» انتخابی (عکس سناریو، قیمت فعلی یا نسخه‌ای از تنظیمات)
+    const priced = scenarioPrices(state, sc);
+    const allIds = Object.keys(sc.parcels);
+    const incl = Array.isArray(sc.estates) ? sc.estates.map(x => (x == null ? NO_ESTATE : String(x))) : null;
+    const poolIds = incl ? allIds.filter(id => incl.indexOf(estateIdOf(priced[id])) >= 0) : allIds;
+    const skipped = incl ? allIds.filter(id => poolIds.indexOf(id) < 0).map(id => (priced[id].name || id)) : [];
+    const errors = [], warnings = [];
     // ارزش کل مجموعه: total ها عدد صحیح‌اند ⇒ جمع دقیق
     let poolF = F0();
     const incomplete = [];
+    const estateBuckets = {};
     poolIds.forEach(id => {
-      const tt = sc.parcels[id].total;
+      const sp = priced[id];
+      const eid = estateIdOf(sp);
+      (estateBuckets[eid] = estateBuckets[eid] || []).push(id);
+      const tt = sp.total;
       if (isNum(tt)) poolF = fAdd(poolF, frac(Math.round(tt)));
-      else incomplete.push(sc.parcels[id].name || id);
+      else incomplete.push(sp.name || id);
     });
     if (incomplete.length) errors.push('زمین‌های بدون ارزش قطعی در مجموع لحاظ نشده‌اند: ' + incomplete.join('، '));
+    if (priced && Object.keys(priced).some(id => priced[id].missingParcel)) warnings.push('بعضی زمین‌های این سناریو دیگر در فهرست زمین‌ها نیستند؛ برای آن‌ها قیمت ثبت‌شده‌ی خود سناریو به کار رفت.');
 
-    // وزن‌ها و حق هر شخص (دقیق)
+    // وزن پیش‌فرض اشخاص (برای دسته‌بندی‌نشده‌ها و پروژه‌های قدیمی)
     const wFs = persons.map(personWeightFrac);
     let wSum = F0(); wFs.forEach(w => { wSum = fAdd(wSum, w); });
-    const entitledF = persons.map((p, i) => (fSign(wSum) > 0 ? fDiv(fMul(poolF, wFs[i]), wSum) : F0()));
+
+    /* حق هر شخص = جمعِ «ارزش هر دسته × سهم او در همان دسته»  */
+    const estateIds = Object.keys(estateBuckets);
+    const groups = estateIds.map(eid => {
+      const ids = estateBuckets[eid];
+      let pf = F0();
+      ids.forEach(id => { const tt = priced[id].total; if (isNum(tt)) pf = fAdd(pf, frac(Math.round(tt))); });
+      const w = estateWeights(state, eid || null);
+      return { id: eid, name: w.name, poolF: pf, weights: w.weights, weightSum: w.sum, usedDefault: w.usedDefault, parcelIds: ids };
+    });
+    const entitledF = persons.map(() => F0());
+    const perEstate = persons.map(() => []);
+    groups.forEach(g => {
+      const noW = fSign(g.weightSum) <= 0;
+      if (noW && fSign(g.poolF) > 0) errors.push('برای دسته‌ی «' + g.name + '» هیچ سهمی ثبت نشده است؛ ارزش آن (' + Math.round(fToNumber(g.poolF)).toLocaleString('en') + ' تومان) بین کسی تقسیم نشد.');
+      else if (g.usedDefault && g.id) warnings.push('برای دسته‌ی «' + g.name + '» سهم جداگانه‌ای ثبت نشده است؛ «سهم پیش‌فرض» اشخاص به کار رفت.');
+      persons.forEach((p, i) => {
+        const share = noW ? F0() : fDiv(g.weights[i], g.weightSum);
+        const val = fMul(g.poolF, share);
+        entitledF[i] = fAdd(entitledF[i], val);
+        perEstate[i].push({
+          id: g.id, name: g.name, weightFrac: g.weights[i], weightText: fText(g.weights[i]),
+          shareFrac: share, shareText: fText(share), sharePct: fPct(share, 4),
+          poolF: g.poolF, pool: Math.round(fToNumber(g.poolF)),
+          entitledF: val, entitled: Math.round(fToNumber(val)), receivedF: F0(), received: 0, parcelCount: g.parcelIds.length,
+        });
+      });
+    });
 
     const res = persons.map((p, i) => ({
       person: p, index: i, weightFrac: wFs[i],
-      entitledShare: fSign(wSum) > 0 ? fDiv(wFs[i], wSum) : F0(),
+      entitledShare: fSign(poolF) > 0 ? fDiv(entitledF[i], poolF) : (fSign(wSum) > 0 ? fDiv(wFs[i], wSum) : F0()),
       entitledF: entitledF[i], receivedF: F0(),
-      area: 0, byScope: {}, byAgri: {}, specialValueF: F0(), parcels: [],
+      area: 0, byScope: {}, byAgri: {}, specialValueF: F0(), parcels: [], byEstate: perEstate[i],
     }));
 
     const used = {}, orphan = [], over = [], under = [];
@@ -1062,7 +1289,9 @@
     const alloc = sc.allocations || {};
     poolIds.forEach(id => {
       const al = alloc[id] || [];
-      const sp = sc.parcels[id];
+      const sp = priced[id];
+      const eid = estateIdOf(sp);
+      const gname = (groups.find(g => g.id === eid) || {}).name || NO_ESTATE_NAME;
       const totalF = isNum(sp.total) ? frac(Math.round(sp.total)) : F0();
       let sum = F0();
       al.forEach(x => {
@@ -1082,7 +1311,15 @@
         r.byAgri[ak] = r.byAgri[ak] || { area: 0, value: 0 };
         r.byAgri[ak].area += ar; r.byAgri[ak].value += fToNumber(valF);
         if (sp.special) r.specialValueF = fAdd(r.specialValueF, valF);
-        r.parcels.push({ id, name: sp.name, fraction: fToNumber(f), fractionText: fText(f), pct: fPct(f, 4), value: fToNumber(valF), valueF: valF, area: ar });
+        const be = r.byEstate.find(z => z.id === eid);
+        if (be) { be.receivedF = fAdd(be.receivedF, valF); be.received = Math.round(fToNumber(be.receivedF)); }
+        r.parcels.push({
+          id, name: sp.name, estateId: eid, estateName: gname, scope: sp.scope,
+          fraction: fToNumber(f), fractionText: fText(f), pct: fPct(f, 4),
+          value: fToNumber(valF), valueF: valF, area: ar,
+          parcelArea: isNum(sp.area) ? sp.area : null, pricePerM2: isNum(sp.pricePerM2) ? sp.pricePerM2 : null,
+          parcelTotal: isNum(sp.total) ? sp.total : null, status: sp.status || null,
+        });
       });
       used[id] = sum;
       if (fCmp(sum, F1()) > 0) {
@@ -1099,7 +1336,7 @@
     const unallocated = under.map(u => ({
       id: u.id, name: u.name, remaining: fToNumber(u.remaining),
       remainingPct: fPct(u.remaining, 4), remainingFrac: fText(u.remaining),
-      value: Math.round(fToNumber(fMul(sc.parcels[u.id].total != null ? frac(Math.round(sc.parcels[u.id].total)) : F0(), u.remaining))),
+      value: Math.round(fToNumber(fMul(priced[u.id].total != null ? frac(Math.round(priced[u.id].total)) : F0(), u.remaining))),
       valueF: u.value,
     }));
     // ارزش واگذارنشده (دقیق) برای کنترل تراز
@@ -1110,20 +1347,43 @@
     let recvTotal = F0(), entTotal = F0();
     res.forEach(r => { recvTotal = fAdd(recvTotal, r.receivedF); entTotal = fAdd(entTotal, r.entitledF); });
 
+    /* گردکردن نمایشی با حفظ جمع (بزرگ‌ترین باقی‌مانده): جمع ستون‌های جدول و
+       جمع بستانکاری‌ها/بدهکاری‌ها دقیقاً می‌خواند و یک‌تومان اختلاف گردکردن پیدا نمی‌شود. */
+    function roundKeepSum(fracs, target) {
+      const xs = fracs.map(f => fToNumber(f));
+      const out = xs.map(x => Math.floor(x));
+      let rem = Math.round(target - out.reduce((s, v) => s + v, 0));
+      const order = xs.map((x, i) => ({ i, r: x - Math.floor(x) })).sort((a, b) => b.r - a.r);
+      for (let k = 0; rem > 0 && k < order.length; k++, rem--) out[order[k].i]++;
+      for (let k = order.length - 1; rem < 0 && k >= 0; k--, rem++) out[order[k].i]--;
+      return out;
+    }
+    const entRound = roundKeepSum(res.map(r => r.entitledF), Math.round(fToNumber(entTotal)));
+    const recvRound = roundKeepSum(res.map(r => r.receivedF), Math.round(fToNumber(recvTotal)));
+
     // گردکردن فقط برای نمایش
-    res.forEach(r => {
+    res.forEach((r, ri) => {
       const diffF = fSub(r.receivedF, r.entitledF);
       r.entitledExact = fToNumber(r.entitledF); r.receivedExact = fToNumber(r.receivedF); r.diffExact = fToNumber(diffF);
-      r.entitled = Math.round(r.entitledExact);
-      r.received = Math.round(r.receivedExact);
-      r.diff = Math.round(r.diffExact);
+      r.entitled = entRound[ri];
+      r.received = recvRound[ri];
+      r.diff = r.received - r.entitled;
       r.diffFrac = fText(diffF);
       r.entitledFracText = fText(r.entitledShare);
       r.entitledPct = fPct(r.entitledShare, 4);
       r.diffPct = fSign(r.entitledF) !== 0 ? fToNumber(fDiv(diffF, r.entitledF)) * 100 : 0;
       r.specialValue = Math.round(fToNumber(r.specialValueF));
       // اگر گردکردنِ نمایشی با اختلاف دقیق یکی نباشد، همان مقدار دقیق ملاک است
-      if (r.received - r.entitled !== r.diff) r.diffNote = 'اختلاف دقیق: ' + fNum(diffF, 2) + ' تومان (نمایش گردشده)';
+      if (Math.round(r.diffExact) !== r.diff) r.diffNote = 'اختلاف دقیق: ' + fNum(diffF, 2) + ' تومان (نمایش گردشده تا جمع ستون‌ها دقیق بخواند)';
+      /* بستانکاری و بدهکاری: مثبت = بیش از حقش گرفته (بدهکار)، منفی = کمتر (بستانکار) */
+      r.debit = r.diff > 0 ? r.diff : 0;
+      r.credit = r.diff < 0 ? -r.diff : 0;
+      r.settle = r.diff === 0 ? 'تراز' : (r.diff > 0 ? 'بدهکار' : 'بستانکار');
+      r.byEstate.forEach(b => {
+        b.diff = b.received - b.entitled;
+        b.settle = b.diff === 0 ? 'تراز' : (b.diff > 0 ? 'بدهکار' : 'بستانکار');
+        delete b.weightFrac; delete b.shareFrac; delete b.poolF; delete b.entitledF; delete b.receivedF;
+      });
       delete r.weightFrac; delete r.entitledF; delete r.receivedF; delete r.specialValueF;
       r.parcels.forEach(q => { q.value = Math.round(q.value); delete q.valueF; });
       Object.keys(r.byScope).forEach(k => { r.byScope[k].value = Math.round(r.byScope[k].value); });
@@ -1159,14 +1419,94 @@
         id: 'totals_ready', ok: incomplete.length === 0,
         msg: incomplete.length === 0 ? 'همه‌ی زمین‌های سناریو ارزش قطعی دارند' : incomplete.length + ' زمین ارزش قطعی ندارد: ' + incomplete.join('، '),
       },
+      {
+        id: 'estate_weights', ok: groups.every(g => fSign(g.weightSum) > 0 || fSign(g.poolF) <= 0),
+        msg: groups.every(g => fSign(g.weightSum) > 0 || fSign(g.poolF) <= 0)
+          ? (groups.length > 1
+            ? 'سهم اشخاص در هر ' + groups.length + ' دسته‌ی اموال ثبت شده و حقِ هرکس جمعِ سهمش در همه‌ی دسته‌هاست'
+            : 'سهم اشخاص برای دسته‌ی اموال ثبت شده است')
+          : 'دسته‌های بدون سهم: ' + groups.filter(g => fSign(g.weightSum) <= 0 && fSign(g.poolF) > 0).map(g => g.name).join('، '),
+      },
     ];
     const exact = {
       poolFrac: fText(poolF), allocatedFrac: fText(allocatedF), unallocatedFrac: fText(unallocatedF),
-      sums: poolIds.map(id => ({ id, name: sc.parcels[id].name, sum: fText(used[id]), pct: fPct(used[id], 4), full: fEq(used[id], F1()) })),
+      sums: poolIds.map(id => ({ id, name: priced[id].name, sum: fText(used[id]), pct: fPct(used[id], 4), full: fEq(used[id], F1()) })),
       weights: persons.map((p, i) => ({ id: p.id, name: p.name, weight: fText(wFs[i]), share: fText(fSign(wSum) > 0 ? fDiv(wFs[i], wSum) : F0()), pct: fSign(wSum) > 0 ? fPct(fDiv(wFs[i], wSum), 4) : '0' })),
       weightSum: fText(wSum),
+      estates: groups.map(g => ({
+        id: g.id, name: g.name, pool: fText(g.poolF), weightSum: fText(g.weightSum),
+        weights: persons.map((p, i) => ({ id: p.id, name: p.name, weight: fText(g.weights[i]), share: fSign(g.weightSum) > 0 ? fText(fDiv(g.weights[i], g.weightSum)) : '0' })),
+      })),
     };
-    return { pool: Math.round(pool), poolExact: pool, results: res, unallocated, over, orphan, errors, checks, exact };
+    /* خلاصه‌ی دسته‌های اموال (برای نمایش و برگه‌ی نهایی) */
+    const estates = groups.map(g => ({
+      id: g.id, name: g.name, parcelCount: g.parcelIds.length, parcelIds: g.parcelIds.slice(),
+      pool: Math.round(fToNumber(g.poolF)), poolFracText: fText(g.poolF),
+      weightSumText: fText(g.weightSum), usedDefaultWeights: !!g.usedDefault && !!g.id,
+      persons: persons.map((p, i) => {
+        const share = fSign(g.weightSum) > 0 ? fDiv(g.weights[i], g.weightSum) : F0();
+        return {
+          id: p.id, name: p.name, weightText: fText(g.weights[i]), shareText: fText(share), sharePct: fPct(share, 4),
+          entitled: Math.round(fToNumber(fMul(g.poolF, share))),
+        };
+      }),
+    }));
+    return {
+      pool: Math.round(pool), poolExact: pool, results: res, unallocated, over, orphan, errors, warnings, checks, exact,
+      estates, basis, basisText: basisText(state, basis), parcelPrices: priced, includedIds: poolIds, skipped,
+    };
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* برگه‌ی نهایی تقسیم: برای هر شخص، فهرست زمین‌هایی که به او رسیده،      */
+  /* جمع کل، و بستانکاری/بدهکاری — به‌علاوه‌ی فهرست «هر زمین به چه کسی».   */
+  /* ---------------------------------------------------------------- */
+  function buildDivisionSheets(state, sc) {
+    const ev = evaluateScenario(state, sc);
+    const priced = ev.parcelPrices;
+    const persons = ev.results.map(r => ({
+      id: r.person.id, name: r.person.name,
+      entitled: r.entitled, received: r.received, diff: r.diff,
+      credit: r.credit, debit: r.debit, settle: r.settle,
+      sharePct: r.entitledPct, shareFracText: r.entitledFracText,
+      area: r.area, byEstate: r.byEstate,
+      lands: r.parcels.map(q => ({
+        id: q.id, name: q.name, estateId: q.estateId, estateName: q.estateName,
+        scope: q.scope, scopeName: SCOPES[q.scope] || '—',
+        shareText: q.fractionText, sharePct: q.pct, area: q.area, parcelArea: q.parcelArea,
+        pricePerM2: q.pricePerM2, value: q.value, parcelTotal: q.parcelTotal, status: q.status,
+      })),
+      totals: {
+        lands: r.parcels.length,
+        area: r.parcels.reduce((s, q) => s + (q.area || 0), 0),
+        value: r.parcels.reduce((s, q) => s + (q.value || 0), 0),
+      },
+    }));
+    const lands = ev.includedIds.map(id => {
+      const sp = priced[id];
+      const parts = [];
+      ev.results.forEach(r => r.parcels.forEach(q => { if (q.id === id) parts.push({ personId: r.person.id, person: r.person.name, shareText: q.fractionText, sharePct: q.pct, area: q.area, value: q.value }); }));
+      const un = ev.unallocated.find(u => u.id === id);
+      return {
+        id, name: sp.name, estateId: estateIdOf(sp), estateName: (ev.estates.find(g => g.id === estateIdOf(sp)) || {}).name || NO_ESTATE_NAME,
+        scope: sp.scope, scopeName: SCOPES[sp.scope] || '—', area: sp.area, pricePerM2: sp.pricePerM2, total: sp.total, status: sp.status,
+        parts, remainingPct: un ? un.remainingPct : null, remainingValue: un ? un.value : 0,
+      };
+    });
+    return {
+      scenario: { id: sc.id, name: sc.name, createdAt: sc.createdAt, settingsVersion: sc.settingsVersion },
+      basis: ev.basis, basisText: ev.basisText, at: nowIso(),
+      pool: ev.pool, estates: ev.estates, persons, lands,
+      totals: {
+        lands: lands.length,
+        area: lands.reduce((s, l) => s + (isNum(l.area) ? l.area : 0), 0),
+        value: ev.pool,
+        received: persons.reduce((s, p) => s + p.received, 0),
+        credit: persons.reduce((s, p) => s + p.credit, 0),
+        debit: persons.reduce((s, p) => s + p.debit, 0),
+      },
+      checks: ev.checks, errors: ev.errors, warnings: ev.warnings, unallocated: ev.unallocated,
+    };
   }
 
   /* ---------------------------------------------------------------- */
@@ -1185,5 +1525,11 @@
     newState, addParcel, saveParcel, updateSettings,
     addPerson, setPersonWeight, personWeightFrac, createScenario,
     setAllocation, setEqualAllocation, allocFrac, allocSum, evaluateScenario,
+    // دسته‌های اموال (چند منبع با سهم متفاوت) و مبنای قیمت سناریو
+    NO_ESTATE, NO_ESTATE_NAME, PRICE_MODES, PRICE_LEVELS,
+    newEstate, addEstate, findEstate, removeEstate, estateIdOf, estateWeightFrac, setEstateWeight,
+    setEstateEqualWeights, estateWeights, setParcelEstate,
+    normBasis, setScenarioBasis, basisSettings, priceLevelSettings, basisText, scenarioPrices,
+    buildDivisionSheets,
   };
 });
