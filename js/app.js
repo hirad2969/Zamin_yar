@@ -96,6 +96,11 @@
     App.tab('map');
   };
 
+  /* دانلود فایل باینری (اکسل) */
+  App.downloadBlob = function (name, blob) {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  };
   /* دانلود فایل متنی */
   App.download = function (name, text, type) {
     const blob = new Blob([text], { type: type || 'application/json' });

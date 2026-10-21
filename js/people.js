@@ -37,27 +37,29 @@
             } })),
             el('td', { text: fa(C.fText(share)) }), el('td', { text: fa(C.fPct(share, 4)) + '٪' }),
             el('td', null, el('button', { class: 'btn sm dng', text: 'حذف', onclick: () => App.confirm('حذف شخص', 'شخص «' + App.esc(p.name) + '» و سهم‌های او در سناریوها حذف شود؟', () => {
-              S.persons = S.persons.filter(x => x.id !== p.id);
-              S.scenarios.forEach(sc => Object.keys(sc.allocations).forEach(k => { sc.allocations[k] = sc.allocations[k].filter(a => a.personId !== p.id); if (!sc.allocations[k].length) delete sc.allocations[k]; }));
+              C.removePerson(S, p.id);
               App.save(); render();
             }, 'حذف') })),
           ]);
         }))]) : el('div', { class: 'note', text: 'هنوز شخصی ثبت نشده است.' }),
     ]));
-    /* سناریوها */
+    /* پرونده‌های زنده */
+    if (App.cases) App.cases.mount(r, render);
+    /* سناریوها (قدیمی: عکس ثابت از قیمت‌ها) */
     const sname = el('input', { type: 'text', placeholder: 'نام سناریو (مثلاً «تقسیم اول»)' });
     r.appendChild(el('div', { class: 'card' }, [
-      el('h3', { text: 'سناریوهای تقسیم' }),
+      el('h3', { text: 'سناریوهای قدیمی (عکس ثابت)' }),
       el('div', { class: 'note', text: 'هر سناریو هنگام ساخت یک «عکس» از قیمت‌ها و ارزش‌های همان لحظه می‌گیرد؛ تغییر قیمت بعدی روی سناریوهای قدیمی اثر ندارد و فقط در سناریوهای جدید دیده می‌شود.' }),
       el('div', { class: 'row' }, [el('div', { class: 'grow' }, sname), el('button', { class: 'btn', text: 'ساخت سناریوی جدید از همه‌ی زمین‌ها', onclick: () => {
         if (!S.parcels.length) { App.toast('ابتدا زمین ثبت کنید', 'warn'); return; }
         const sc = C.createScenario(S, sname.value.trim() || 'سناریو ' + App.n(S.scenarios.length + 1, 0)); curSc = sc.id; App.save(); render();
       } })]),
-      S.scenarios.length ? el('table', { class: 't', style: 'margin-top:8px' }, [el('thead', null, el('tr', null, ['نام', 'زمان ساخت', 'نسخه‌ی قیمت‌ها', 'تعداد زمین', ''].map(h => el('th', { text: h })))),
-        el('tbody', null, S.scenarios.map(sc => el('tr', { style: sc.id === curSc ? 'background:var(--sel)' : '' }, [
+      S.scenarios.some(x => !x.live) ? el('table', { class: 't', style: 'margin-top:8px' }, [el('thead', null, el('tr', null, ['نام', 'زمان ساخت', 'نسخه‌ی قیمت‌ها', 'تعداد زمین', ''].map(h => el('th', { text: h })))),
+        el('tbody', null, S.scenarios.filter(x => !x.live).map(sc => el('tr', { style: sc.id === curSc ? 'background:var(--sel)' : '' }, [
           el('td', { class: 'l', text: sc.name }), el('td', { text: App.fmtDate(sc.createdAt) }), el('td', { text: App.n(sc.settingsVersion, 0) + (sc.settingsVersion !== S.settings.version ? ' (قدیمی)' : '') }), el('td', { text: App.n(Object.keys(sc.parcels).length, 0) }),
           el('td', null, el('div', { class: 'row' }, [
             el('button', { class: 'btn sm', text: 'باز کردن', onclick: () => { curSc = sc.id; render(); } }),
+            el('button', { class: 'btn sm sec2', text: 'تبدیل به پرونده‌ی زنده', onclick: () => { const c = C.convertScenarioToCase(S, sc.id); if (c) { App.cases.open(c.id); App.save(); render(); App.toast('پرونده‌ی زنده ساخته شد؛ در بخش بالا باز شده است.', 'ok'); } } }),
             el('button', { class: 'btn sm sec2', text: 'نسخه‌ی جدید با قیمت‌های فعلی', onclick: () => {
               const n = C.createScenario(S, sc.name + ' (قیمت‌های جدید)', Object.keys(sc.parcels).filter(id => S.parcels.some(p => p.id === id)));
               Object.keys(sc.allocations).forEach(pid => { if (n.parcels[pid]) n.allocations[pid] = C.clone(sc.allocations[pid]); });
@@ -67,7 +69,7 @@
           ])),
         ])))]) : el('div', { class: 'note', text: 'هنوز سناریویی ساخته نشده است.' }),
     ]));
-    const sc = S.scenarios.find(x => x.id === curSc);
+    const sc = S.scenarios.find(x => x.id === curSc && !x.live);
     if (sc) r.appendChild(scenarioView(sc));
   }
 

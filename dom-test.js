@@ -26,7 +26,7 @@ const loadErrors = [];
 w.addEventListener('error', (e) => loadErrors.push('window.error: ' + ((e.error && e.error.stack) || e.message)));
 const FILES = ['vendor/leaflet.js', 'vendor/proj4.js', 'vendor/xlsx.full.min.js', 'vendor/jszip.min.js',
   'core.js', 'detect.js', 'js/app.js', 'js/map.js', 'js/autodetect.js', 'js/split.js', 'js/importer.js',
-  'js/gps.js', 'js/form.js', 'js/parcels.js', 'js/settings.js', 'js/people.js', 'js/project.js'];
+  'js/gps.js', 'js/form.js', 'js/parcels.js', 'js/settings.js', 'js/cases.js', 'js/people.js', 'js/project.js'];
 FILES.forEach(f => { try { w.eval(read(f)); } catch (e) { loadErrors.push('بارگذاری ' + f + ': ' + e.message); } });
 let started = null;
 try { w.eval('App.start()'); } catch (e) { started = e.message; }
@@ -205,6 +205,53 @@ t('نسخه‌ی وب: ذخیره‌ی خودکار در مرورگر و فای�
   ok(s2.scenarios[s2.scenarios.length - 1].allocations, 'سهم‌ها در فایل پروژه نیست');
   const a = s2.scenarios[s2.scenarios.length - 1].allocations[Object.keys(s2.scenarios[s2.scenarios.length - 1].allocations)[0]][0];
   ok(a.num && a.den, 'کسر دقیق در فایل پروژه ذخیره نشده است');
+});
+
+t('پرونده‌ی زنده: ساخت، بخش‌ها، واگذاری، معامله، کسری و تغییر قیمت در رابط', () => {
+  const S = w.App.S;
+  S.parcels.length = 0;
+  const mk = (name, total, area) => { const id = 'LC' + S.parcels.length; S.parcels.push({ id, name, notes: name.indexOf('دره') >= 0 ? 'دره گرمی' : '', scope: 'rural_inside', attrs: {}, grade: 'grade1', special: false, valuation: { area, pricePerM2: Math.round(total / area), total, status: 'ok' } }); return id; };
+  const a = mk('دره الف', 1000000000, 1000), b = mk('پدری ب', 3000000000, 3000);
+  S.persons.length = 0; S.scenarios.length = 0;
+  const P1 = C.addPerson(S, 'علی', 1), P2 = C.addPerson(S, 'بابک', 1);
+  w.App.save(); w.eval('App.tab("people")'); w.eval('App.tab("map")'); w.eval('App.tab("people")');
+  const root = doc.getElementById('people-root');
+  const click = (n) => n.dispatchEvent(new w.Event('click'));
+  click(doc.getElementById('case-new'));
+  const sc = S.scenarios.find(x => x.live); ok(sc, 'پرونده ساخته نشد');
+  // تیک زمین‌ها
+  const cbs = Array.from(doc.querySelectorAll('#case-view input[type=checkbox]'));
+  ok(cbs.length >= 4, 'چک‌باکس‌ها پیدا نشد');
+  cbs.forEach(cb => { if (!cb.checked) { cb.checked = true; cb.dispatchEvent(new w.Event('change')); } });
+  ok(sc.parcelIds.indexOf(a) >= 0 && sc.parcelIds.indexOf(b) >= 0, 'زمین‌ها انتخاب نشد');
+  ok(sc.personIds.length === 2, 'اشخاص انتخاب نشد');
+  // بخش دره‌گرمی با عبارت
+  click(doc.querySelector('[data-ct=sections]'));
+  const ph = Array.from(doc.querySelectorAll('#case-view input[type=text]')).find(i => /عبارت/.test(i.placeholder));
+  ph.value = 'دره گرمی';
+  click(Array.from(doc.querySelectorAll('#case-view button')).find(b2 => /ساخت بخش با عبارت/.test(b2.textContent)));
+  ok(sc.sections.length === 2 && sc.sections[1].parcelIds.indexOf(a) >= 0, 'بخش با عبارت ساخته نشد');
+  C.setSectionWeight(sc, sc.sections[1].id, P1.id, '3'); C.setSectionWeight(sc, sc.sections[1].id, P2.id, '1');
+  // واگذاری: همه‌ی زمین‌ها به علی
+  C.setAllocation(sc, a, P1.id, 1); C.setAllocation(sc, b, P1.id, 1);
+  let ev = C.evaluateScenario(S, sc);
+  const r1 = ev.results.find(r => r.person.id === P1.id), r2 = ev.results.find(r => r.person.id === P2.id);
+  near(r2.short, 1750000000, 1, 'کسری بابک');
+  // معامله‌ی نقدی از علی به بابک
+  click(doc.querySelector('[data-ct=deals]'));
+  const sels = doc.querySelectorAll('#case-view select');
+  sels[0].value = 'cash'; sels[0].dispatchEvent(new w.Event('change'));
+  const amt = Array.from(doc.querySelectorAll('#case-view input[type=text]')).find(i => /مبلغ/.test(i.placeholder)); amt.value = '1000000000';
+  click(doc.getElementById('deal-add'));
+  ok(sc.deals.length === 1, 'معامله ثبت نشد');
+  click(doc.querySelector('[data-ct=result]'));
+  ok(/لیست نهایی/.test(root.textContent) && /کسری/.test(root.textContent), 'نتیجه نمایش داده نشد');
+  // تغییر قیمت یک زمین ⇒ نتیجه تازه می‌شود
+  S.parcels.find(p => p.id === b).valuation.total = 5000000000; w.App.save();
+  ev = C.evaluateScenario(S, sc);
+  near(ev.pool, 6000000000, 1, 'جمع زنده');
+  ok(!/\[object/.test(root.textContent), 'متن نامعتبر در صفحه');
+  ok(w.App.cases.textOf(sc, ev).indexOf('علی') >= 0, 'متن خروجی');
 });
 
 console.log(out.join('\n'));

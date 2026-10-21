@@ -584,6 +584,173 @@ t('برش: قسمت‌ها صفت‌های زمین مبدأ را نگه می‌
   ok(ev.checks.every(k => k.ok), ev.checks.filter(k => !k.ok).map(k => k.msg).join(' | '));
 });
 
+/* -------- پرونده‌ی زنده: بخش‌ها، معامله‌ها، تسویه -------- */
+function mkLand(st, name, total, area) {
+  const id = 'L' + (st.parcels.length + 1);
+  st.parcels.push({ id, name, scope: 'rural_inside', attrs: {}, grade: 'grade1', special: false, valuation: { area, pricePerM2: Math.round(total / area), total, status: 'ok' } });
+  return id;
+}
+function mkCase() {
+  const st = C.newState();
+  const d1 = mkLand(st, 'دره‌گرمی ۱', 1000000000, 1000), d2 = mkLand(st, 'دره‌گرمی ۲', 880000000, 800);
+  const r1 = mkLand(st, 'پدری ۱', 3000000000, 3000), r2 = mkLand(st, 'پدری ۲', 7000000000, 7000);
+  const M = C.addPerson(st, 'مصطفی', 1), E = C.addPerson(st, 'اسفندیار', 1), A = C.addPerson(st, 'امیر', 1), H = C.addPerson(st, 'مهدی', 1);
+  const sc = C.createCase(st, 'ارث', null, null);
+  const dg = C.addSection(sc, 'دره‌گرمی', { parcelIds: [d1, d2] });
+  const rest = sc.sections[0]; rest.name = 'پدری';
+  [[M, '8'], [E, '8'], [A, '1'], [H, '4']].forEach(([p, w]) => C.setSectionWeight(sc, dg.id, p.id, w));
+  [[M, '1'], [E, '1'], [A, '1'], [H, '4']].forEach(([p, w]) => C.setSectionWeight(sc, rest.id, p.id, w));
+  return { st, sc, d1, d2, r1, r2, M, E, A, H, dg, rest };
+}
+t('پرونده‌ی زنده: حق هر نفر = جمع وزنیِ بخش‌ها، و جمع حق‌ها دقیقاً برابر ارزش کل', () => {
+  const { st, sc, M, E, A, H } = mkCase();
+  const ev = C.evaluateScenario(st, sc);
+  eq(ev.pool, 11880000000);
+  const want = { [M.id]: 10e9 / 7 + 1.88e9 * 8 / 21, [E.id]: 10e9 / 7 + 1.88e9 * 8 / 21, [A.id]: 10e9 / 7 + 1.88e9 / 21, [H.id]: 10e9 * 4 / 7 + 1.88e9 * 4 / 21 };
+  ev.results.forEach(r => near(r.entitledExact, want[r.person.id], 0.01, r.person.name + ' '));
+  ok(ev.checks.find(k => k.id === 'entitled_balance').ok, 'حق‌ها با ارزش کل نمی‌خواند');
+  ok(ev.checks.find(k => k.id === 'sections_ok').ok);
+  eq(ev.sections.length, 2); eq(ev.sections.find(x => x.name === 'دره‌گرمی').count, 2);
+});
+t('پرونده‌ی زنده: بخش‌ها درصد هر نفر را جدا و درصد نهایی از کل را وزنی می‌دهند', () => {
+  const { st, sc, M, A } = mkCase();
+  const ev = C.evaluateScenario(st, sc);
+  const dg = ev.sections.find(s => s.name === 'دره‌گرمی'), pd = ev.sections.find(s => s.name === 'پدری');
+  eq(dg.pool, 1880000000); eq(pd.pool, 10000000000);
+  near(parseFloat(dg.poolPct), 1.88 / 11.88 * 100, 0.001);
+  const m = ev.results.find(r => r.person.id === M.id), a = ev.results.find(r => r.person.id === A.id);
+  eq(m.sections.find(x => x.sectionName === 'دره‌گرمی').fracText, '8/21'); eq(m.sections.find(x => x.sectionName === 'پدری').fracText, '1/7');
+  near(parseFloat(m.entitledPct), (10e9 / 7 + 1.88e9 * 8 / 21) / 11.88e9 * 100, 0.001);
+  eq(a.sections.find(x => x.sectionName === 'دره‌گرمی').fracText, '1/21');
+  // مجموع درصدها دقیقاً ۱۰۰
+  near(ev.results.reduce((s, r) => s + parseFloat(r.entitledPct), 0), 100, 0.001);
+});
+t('پرونده‌ی زنده: با عوض‌شدن قیمت یک زمین همه‌چیز خودکار دوباره حساب می‌شود (عکس ثابت نیست)', () => {
+  const { st, sc, d1, M } = mkCase();
+  const before = C.evaluateScenario(st, sc).results.find(r => r.person.id === M.id).entitled;
+  st.parcels.find(p => p.id === d1).valuation.total = 2000000000;          // ارزش دره‌گرمی ۱ دو برابر شد
+  const ev = C.evaluateScenario(st, sc);
+  eq(ev.pool, 12880000000);
+  const after = ev.results.find(r => r.person.id === M.id).entitled;
+  ok(after > before, 'حق باید بیشتر شود');
+  near(after, 10e9 / 7 + 2.88e9 * 8 / 21, 1);
+  // سناریوی قدیمی همان عکس را نگه می‌دارد
+  const old = C.createScenario(st, 'قدیم'); st.parcels.find(p => p.id === d1).valuation.total = 1000000000;
+  eq(C.evaluateScenario(st, old).pool, 12880000000);
+});
+t('وزن بخش: جمع کسرها «1/3+1/21» دقیقاً ۸/۲۱ است و ورودی نامعتبر رد می‌شود', () => {
+  const { sc, M, dg } = mkCase();
+  eq(C.fText(C.setSectionWeight(sc, dg.id, M.id, '1/3+1/21')), '8/21');
+  eq(C.fText(C.toFrac('10%+5%')), '3/20'); eq(C.fText(C.toFrac('+5')), '5'); eq(C.toFrac('1/3+x'), null);
+  eq(C.setSectionWeight(sc, dg.id, M.id, 'abc'), null); eq(C.setSectionWeight(sc, dg.id, M.id, '-1'), null);
+  eq(C.fText(C.setSectionWeight(sc, dg.id, M.id, '')), '0');
+  eq(C.sectionWeightFrac(dg, M.id).n, 0n);
+});
+t('بخش‌ها: زمین تکراری یا بی‌بخش و بخش بدون سهم خطا می‌دهند', () => {
+  const { st, sc, d1, d2, dg, rest } = mkCase();
+  rest.rest = false; rest.parcelIds = [d1];                                  // d1 در دو بخش، پدری‌ها بی‌بخش
+  const ev = C.evaluateScenario(st, sc);
+  ok(!ev.checks.find(k => k.id === 'sections_ok').ok);
+  ok(ev.errors.some(e => /بیش از یک بخش/.test(e)) && ev.errors.some(e => /بدون بخش/.test(e)));
+  rest.rest = true; rest.parcelIds = []; Object.keys(dg.weights).forEach(k => delete dg.weights[k]);
+  ok(C.evaluateScenario(st, sc).errors.some(e => /سهمی برای هیچ‌کس/.test(e)));
+});
+t('واگذاری و فهرست نهایی: زمین‌های هر نفر زیر نام خودش، مانده‌ها و تسویه‌ی دقیق', () => {
+  const { st, sc, d1, d2, r1, r2, M, E, A, H } = mkCase();
+  C.setAllocation(sc, d1, H.id, 1); C.setAllocation(sc, d2, A.id, 1);
+  C.setAllocation(sc, r1, M.id, 1); C.setAllocation(sc, r2, E.id, '1/2'); C.setAllocation(sc, r2, H.id, '1/2');
+  const ev = C.evaluateScenario(st, sc);
+  const by = (p) => ev.results.find(r => r.person.id === p.id);
+  eq(by(H).finalLines.map(l => l.name).join('|'), 'دره‌گرمی ۱|پدری ۲'); eq(by(H).finalLines[1].fractionText, '1/2');
+  eq(by(H).finalValue, 1000000000 + 3500000000); eq(by(M).finalValue, 3000000000);
+  eq(by(M).finalLines.length, 1); eq(by(A).finalValue, 880000000);
+  ok(ev.checks.find(k => k.id === 'full').ok && ev.settlementBalanced);
+  eq(ev.results.reduce((s, r) => s + r.finalDiff, 0), 0, 'جمع مانده‌ها');
+  ok(by(M).finalDiff > 0 && by(E).finalDiff > 0 && by(A).finalDiff < 0 && by(H).finalDiff < 0, 'علامت مانده‌ها');
+  eq(by(H).short, -by(H).finalDiff);
+  // تسویه: جمع پرداخت‌ها = جمع بدهی‌ها = جمع طلب‌ها
+  const paid = ev.settlement.reduce((s, x) => s + x.amountExact, 0), owed = ev.results.filter(r => r.finalDiff > 0).reduce((s, r) => s + r.finalDiffExact, 0);
+  ok(ev.settlement.every(x => ['مصطفی', 'اسفندیار'].includes(x.fromName) && ['امیر', 'مهدی'].includes(x.toName)), 'جهت تسویه');
+  near(paid, owed, 0.01);
+  ev.settlement.forEach(x => ok(x.from !== x.to && x.amount > 0));
+});
+t('معامله‌ی زمین: بخشی از سهم یک نفر به دیگری می‌رود و در فهرست نهایی با یادداشت می‌آید', () => {
+  const { st, sc, d1, r2, E, H } = mkCase();
+  C.setAllocation(sc, r2, H.id, 1);
+  C.addDeal(sc, { kind: 'parcel', from: H.id, to: E.id, parcelId: r2, frac: '1/4', note: 'تهاتر قدیمی' });
+  const ev = C.evaluateScenario(st, sc);
+  const h = ev.results.find(r => r.person.id === H.id), e = ev.results.find(r => r.person.id === E.id);
+  eq(h.finalLines[0].fractionText, '3/4'); eq(e.finalLines[0].fractionText, '1/4');
+  ok(/از مهدی/.test(e.finalLines[0].note) && /به اسفندیار/.test(h.finalLines[0].note));
+  eq(e.finalValue, 1750000000); eq(h.finalValue, 5250000000);
+  eq(e.finalDiff - (e.finalValue - e.entitled), 0);
+  ok(e.dealLines.length === 1 && /تهاتر قدیمی/.test(e.dealLines[0]));
+  // همه‌ی سهم: all
+  C.addDeal(sc, { kind: 'parcel', from: H.id, to: E.id, parcelId: r2, all: true });
+  const ev2 = C.evaluateScenario(st, sc);
+  eq(ev2.results.find(r => r.person.id === H.id).finalLines.length, 0);
+  eq(ev2.results.find(r => r.person.id === E.id).finalValue, 7000000000);
+  ok(ev2.checks.find(k => k.id === 'deals_ok').ok);
+});
+t('معامله‌ی پول: مانده‌ی پرداخت‌کننده کم و دریافت‌کننده زیاد می‌شود و جمع مانده‌ها ثابت می‌ماند', () => {
+  const { st, sc, d1, d2, r1, r2, M, E, A, H } = mkCase();
+  [[d1, H], [d2, A], [r1, M], [r2, E]].forEach(([id, p]) => C.setAllocation(sc, id, p.id, 1));
+  const base = C.evaluateScenario(st, sc);
+  const bd = (r, p) => r.results.find(x => x.person.id === p.id).finalDiff;
+  C.addDeal(sc, { kind: 'cash', from: E.id, to: M.id, amount: 500000000 });   // اسفندیار به مصطفی ۵۰۰ میلیون
+  const ev = C.evaluateScenario(st, sc);
+  eq(bd(ev, E), bd(base, E) - 500000000); eq(bd(ev, M), bd(base, M) + 500000000);
+  eq(ev.results.reduce((s, r) => s + r.finalDiff, 0), 0);
+  eq(ev.results.find(r => r.person.id === E.id).cashNet, -500000000);
+});
+t('معامله‌ی نامعتبر: بیش از سهم، طرفین یکسان، مبلغ منفی ⇒ خطا و بی‌اثر', () => {
+  const { st, sc, r1, M, E } = mkCase();
+  C.setAllocation(sc, r1, M.id, '1/4');
+  const base = C.evaluateScenario(st, sc).results.find(r => r.person.id === M.id).finalValue;
+  C.addDeal(sc, { kind: 'parcel', from: M.id, to: E.id, parcelId: r1, frac: '1/2' });
+  C.addDeal(sc, { kind: 'parcel', from: M.id, to: M.id, parcelId: r1, frac: '1/8' });
+  C.addDeal(sc, { kind: 'cash', from: M.id, to: E.id, amount: -5 });
+  const ev = C.evaluateScenario(st, sc);
+  ok(!ev.checks.find(k => k.id === 'deals_ok').ok); eq(ev.errors.filter(e => /معامله/.test(e)).length, 3);
+  eq(ev.results.find(r => r.person.id === M.id).finalValue, base);
+});
+t('تبدیل سناریوی قدیمی به پرونده‌ی زنده: همان واگذاری‌ها و همان حق‌ها', () => {
+  const st = C.newState();
+  const a = mkLand(st, 'الف', 600000000, 60), b = mkLand(st, 'ب', 400000000, 40);
+  const p1 = C.addPerson(st, 'یک', 3), p2 = C.addPerson(st, 'دو', 1);
+  const old = C.createScenario(st, 'قدیمی'); C.setAllocation(old, a, p1.id, 1); C.setAllocation(old, b, p2.id, 1);
+  const evOld = C.evaluateScenario(st, old);
+  const nc = C.convertScenarioToCase(st, old.id, 'زنده');
+  ok(nc.live && nc.sourceScenario === old.id && nc.name === 'زنده');
+  const ev = C.evaluateScenario(st, nc);
+  evOld.results.forEach((r, i) => { eq(ev.results[i].entitled, r.entitled); eq(ev.results[i].received, r.received); eq(ev.results[i].diff, r.diff); });
+  eq(C.convertScenarioToCase(st, nc.id), null);                              // پرونده‌ی زنده دوباره تبدیل نمی‌شود
+  st.parcels.find(p => p.id === a).valuation.total = 1000000000;
+  eq(C.evaluateScenario(st, nc).pool, 1400000000);                           // زنده
+  eq(C.evaluateScenario(st, old).pool, 1000000000);                          // عکس ثابت
+});
+t('پرونده‌های مستقل: هر پرونده فقط زمین‌ها و اشخاص خودش را می‌شمارد', () => {
+  const st = C.newState();
+  const a = mkLand(st, 'الف', 100, 1), b = mkLand(st, 'ب', 900, 9), c = mkLand(st, 'ج', 5000, 5);
+  const x = C.addPerson(st, 'ایکس', 1), y = C.addPerson(st, 'ایگرگ', 1), z = C.addPerson(st, 'زد', 1);
+  const c1 = C.createCase(st, 'یک', [a, b], [x.id, y.id]), c2 = C.createCase(st, 'دو', [c], [z.id]);
+  const e1 = C.evaluateScenario(st, c1), e2 = C.evaluateScenario(st, c2);
+  eq(e1.pool, 1000); eq(e1.results.length, 2); eq(e1.results[0].entitled, 500);
+  eq(e2.pool, 5000); eq(e2.results.length, 1); eq(e2.results[0].entitled, 5000);
+  C.setAllocation(c1, c, x.id, 1);                                         // سهم زمینی که در پرونده نیست
+  ok(C.evaluateScenario(st, c1).results[0].received === 0);
+  // حذف شخص از همه‌جا
+  C.setAllocation(c1, a, x.id, 1); C.addDeal(c1, { kind: 'cash', from: x.id, to: y.id, amount: 5 });
+  C.removePerson(st, x.id);
+  ok(!c1.personIds.includes(x.id) && !c1.deals.length && !(c1.sections[0].weights[x.id]) && !c1.allocations[a]);
+});
+t('زمین حذف‌شده از برنامه: پرونده خطا می‌دهد ولی نمی‌شکند', () => {
+  const { st, sc, d1 } = mkCase();
+  st.parcels = st.parcels.filter(p => p.id !== d1);
+  const ev = C.evaluateScenario(st, sc);
+  ok(ev.errors.some(e => /حذف شده/.test(e)) && ev.pool === 10880000000);
+});
+
 (async () => {
   // KMZ (async)
   try {

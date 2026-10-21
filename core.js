@@ -95,6 +95,15 @@
     const pct = /[٪%]/.test(s);
     s = s.replace(/[٪%]/g, '').replace(/,/g, '').trim();
     if (s === '') return null;
+    // جمع کسرها: «1/3+1/21» یا «10+5» (علامت «+» اول رشته یا بعد از e نمای علمی جمع نیست)
+    for (let i = 1; i < s.length; i++) {
+      if (s[i] === '+' && !/[eE]/.test(s[i - 1])) {
+        const a = toFrac(s.slice(0, i)), b = toFrac(s.slice(i + 1));
+        if (!a || !b) return null;
+        const sum = fAdd(a, b);
+        return pct ? fDiv(sum, frac(100)) : sum;
+      }
+    }
     let f = null;
     if (s.indexOf('/') >= 0) {
       // «3 1/4» (عدد مخلوط) یا «1/8» یا «12.5/100»
@@ -974,18 +983,100 @@
     return w;
   }
   /** ساخت سناریو با «عکس» قیمت‌های فعلی؛ سناریوهای قدیمی دست‌نخورده می‌مانند */
+  function parcelSnap(p) {
+    const v = p.valuation || {}, at = p.attrs || {};
+    return {
+      name: p.name, scope: p.scope, area: v.area, pricePerM2: v.pricePerM2, total: v.total, special: !!p.special,
+      agri: p.scope === 'rural_outside' ? at.farmType : (p.scope === 'rural_inside' || at.urbanUse === 'agri' ? at.agri : null),
+      grade: p.grade, urbanUse: at.urbanUse, status: v.status,
+    };
+  }
   function createScenario(state, name, parcelIds) {
     const snap = {};
-    state.parcels.filter(p => !parcelIds || parcelIds.indexOf(p.id) >= 0).forEach(p => {
-      const v = p.valuation || {};
-      snap[p.id] = {
-        name: p.name, scope: p.scope, area: v.area, pricePerM2: v.pricePerM2, total: v.total, special: !!p.special,
-        agri: p.scope === 'rural_outside' ? p.attrs.farmType : (p.scope === 'rural_inside' || p.attrs.urbanUse === 'agri' ? p.attrs.agri : null),
-        grade: p.grade, urbanUse: p.attrs.urbanUse, status: v.status,
-      };
-    });
+    state.parcels.filter(p => !parcelIds || parcelIds.indexOf(p.id) >= 0).forEach(p => { snap[p.id] = parcelSnap(p); });
     const sc = { id: uid('sc'), name: name || 'سناریو', createdAt: nowIso(), settingsVersion: state.settings.version, parcels: snap, allocations: {} };
     state.scenarios.push(sc); return sc;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* پرونده‌ی زنده                                                      */
+  /* برخلاف سناریوی قدیمی «عکس ثابت» نمی‌گیرد: زمین‌ها، مساحت و ارزش‌ها     */
+  /* هر بار از اطلاعات فعلی خوانده می‌شوند؛ با عوض‌شدن هر قیمت یا مساحت     */
+  /* همه‌ی جمع‌ها، حق‌ها و مانده‌ها خودبه‌خود دوباره حساب می‌شوند.          */
+  /* هر پرونده زمین‌ها و اشخاص مستقل خودش را دارد.                          */
+  /* ---------------------------------------------------------------- */
+  /** زمین‌های پرونده با مقدارهای فعلی (به شکل همان «عکس» سناریو، ولی تازه) */
+  function caseParcels(state, sc) {
+    const want = sc.parcelIds || [], out = {};
+    state.parcels.forEach(p => { if (want.indexOf(p.id) >= 0) out[p.id] = parcelSnap(p); });
+    return out;
+  }
+  function addSection(sc, name, opts) {
+    const o = opts || {};
+    const sec = { id: uid('sec'), name: name || 'بخش', rest: !!o.rest, parcelIds: (o.parcelIds || []).slice(), weights: {} };
+    (sc.personIds || []).forEach(pid => { sec.weights[pid] = Object.assign({ text: '1' }, fPack(F1())); });
+    (sc.sections = sc.sections || []).push(sec);
+    return sec;
+  }
+  /** ثبت سهم نسبی یک شخص در یک بخش؛ ورودی عدد، کسر یا جمع کسرها («1/3+1/21»)؛ خالی = بدون سهم؛ نامعتبر ⇒ null */
+  function setSectionWeight(sc, secId, personId, input) {
+    const sec = (sc.sections || []).find(s => s.id === secId);
+    if (!sec) return null;
+    const txt = String(input == null ? '' : input).trim();
+    if (txt === '') { delete sec.weights[personId]; return F0(); }
+    const f = toFrac(txt);
+    if (!f || fSign(f) < 0) return null;
+    sec.weights[personId] = Object.assign({ text: txt }, fPack(f));
+    return f;
+  }
+  function sectionWeightFrac(sec, personId) {
+    const w = sec && sec.weights && sec.weights[personId];
+    const f = w ? toFrac(w) : null;
+    return f && fSign(f) > 0 ? f : F0();
+  }
+  /** پرونده‌ی زنده‌ی تازه: زمین‌ها و اشخاص انتخابی، یک بخش «همه‌ی زمین‌ها» با سهم مساوی */
+  function createCase(state, name, parcelIds, personIds) {
+    const ids = (parcelIds || state.parcels.map(p => p.id)).filter(id => state.parcels.some(p => p.id === id));
+    const pids = ((personIds && personIds.length) ? personIds : state.persons.map(p => p.id)).filter(id => state.persons.some(p => p.id === id));
+    const sc = { id: uid('sc'), name: name || 'پرونده', createdAt: nowIso(), live: true, parcelIds: ids, personIds: pids, sections: [], deals: [], allocations: {}, parcels: {}, settingsVersion: state.settings.version };
+    addSection(sc, 'همه‌ی زمین‌ها', { rest: true });
+    state.scenarios.push(sc); return sc;
+  }
+  /** تبدیل سناریوی قدیمی به پرونده‌ی زنده (واگذاری‌ها و سهم نسبی اشخاص حفظ می‌شود) */
+  function convertScenarioToCase(state, scenarioId, name) {
+    const old = state.scenarios.find(x => x.id === scenarioId);
+    if (!old || old.live) return null;
+    const ids = Object.keys(old.parcels || {}).filter(id => state.parcels.some(p => p.id === id));
+    const sc = createCase(state, name || old.name + ' (زنده)', ids, null);
+    const sec = sc.sections[0];
+    state.persons.forEach(p => { if (sc.personIds.indexOf(p.id) >= 0) { const w = personWeightFrac(p); sec.weights[p.id] = Object.assign({ text: fText(w) }, fPack(w)); } });
+    ids.forEach(id => { if (old.allocations && old.allocations[id]) sc.allocations[id] = clone(old.allocations[id]); });
+    sc.sourceScenario = old.id;
+    return sc;
+  }
+  /** ثبت معامله‌ی جانبی: {kind:'parcel', from, to, parcelId, all|num/den|frac} یا {kind:'cash', from, to, amount} */
+  function addDeal(sc, d) {
+    const deal = { id: uid('deal'), kind: d.kind === 'cash' ? 'cash' : 'parcel', from: d.from, to: d.to, note: d.note || '' };
+    if (deal.kind === 'cash') deal.amount = d.amount;
+    else {
+      deal.parcelId = d.parcelId;
+      const f = d.all ? null : toFrac(d.frac);
+      if (d.all || !f) deal.all = true; else { deal.num = String(f.n); deal.den = String(f.d); deal.shareText = d.text || fText(f); }
+    }
+    (sc.deals = sc.deals || []).push(deal); return deal;
+  }
+  /** حذف کامل یک شخص از همه‌جا (واگذاری‌ها، بخش‌ها، معامله‌ها و عضویت پرونده‌ها) */
+  function removePerson(state, personId) {
+    state.persons = state.persons.filter(x => x.id !== personId);
+    (state.scenarios || []).forEach(sc => {
+      Object.keys(sc.allocations || {}).forEach(k => {
+        sc.allocations[k] = sc.allocations[k].filter(a => a.personId !== personId);
+        if (!sc.allocations[k].length) delete sc.allocations[k];
+      });
+      if (sc.personIds) sc.personIds = sc.personIds.filter(id => id !== personId);
+      (sc.sections || []).forEach(s => { if (s.weights) delete s.weights[personId]; });
+      if (sc.deals) sc.deals = sc.deals.filter(d => d.from !== personId && d.to !== personId);
+    });
   }
   /**
    * ثبت سهم یک شخص از یک زمین با کسر دقیق.
@@ -1027,28 +1118,104 @@
   }
 
   /**
+   * برنامه‌ی بخش‌های پرونده: هر زمین دقیقاً به یک بخش می‌رسد (بخش‌های انتخابی و یک بخش «بقیه»)؛
+   * حق هر شخص = جمع (ارزش بخش × سهم نسبی او در همان بخش ÷ جمع سهم‌های نسبی آن بخش).
+   */
+  function sectionPlan(sc, snap, persons, poolF, errors) {
+    const ids = Object.keys(snap), secs = sc.sections, owner = {}, dups = [];
+    let issues = 0;
+    secs.forEach((s, si) => {
+      if (s.rest) return;
+      (s.parcelIds || []).forEach(id => { if (!snap[id]) return; if (owner[id] != null) dups.push(snap[id].name || id); else owner[id] = si; });
+    });
+    const restIdx = secs.findIndex(s => s.rest);
+    const unassigned = [];
+    ids.forEach(id => { if (owner[id] == null) { if (restIdx >= 0) owner[id] = restIdx; else unassigned.push(snap[id].name || id); } });
+    if (dups.length) { issues++; errors.push('زمین در بیش از یک بخش آمده است: ' + dups.join('، ')); }
+    if (unassigned.length) { issues++; errors.push('زمین بدون بخش (در هیچ بخشی نیست و بخش «بقیه‌ی زمین‌ها» هم تعریف نشده): ' + unassigned.join('، ')); }
+    const entitledF = persons.map(() => F0());
+    const perPerson = persons.map(() => []);
+    const out = secs.map((s, si) => {
+      let pool = F0(), area = 0; const members = [];
+      ids.forEach(id => {
+        if (owner[id] !== si) return;
+        members.push(id);
+        const t = snap[id].total;
+        if (isNum(t)) pool = fAdd(pool, frac(Math.round(t)));
+        if (isNum(snap[id].area)) area += snap[id].area;
+      });
+      const ws = persons.map(p => sectionWeightFrac(s, p.id));
+      let wsum = F0(); ws.forEach(w => { wsum = fAdd(wsum, w); });
+      if (fSign(wsum) <= 0 && fSign(pool) > 0) { issues++; errors.push('برای بخش «' + s.name + '» سهمی برای هیچ‌کس تعیین نشده است'); }
+      const poolShare = fSign(poolF) > 0 ? fDiv(pool, poolF) : F0();
+      const rows = persons.map((p, i) => {
+        const share = fSign(wsum) > 0 ? fDiv(ws[i], wsum) : F0();
+        const val = fMul(pool, share);
+        entitledF[i] = fAdd(entitledF[i], val);
+        const row = { personId: p.id, name: p.name, weightText: fText(ws[i]), fracText: fText(share), pct: fPct(share, 4), value: Math.round(fToNumber(val)), valueExact: fToNumber(val) };
+        perPerson[i].push(Object.assign({ id: s.id, sectionName: s.name }, row));
+        return row;
+      });
+      return { id: s.id, name: s.name, rest: !!s.rest, count: members.length, area, parcelIds: members, pool: Math.round(fToNumber(pool)), poolExact: fToNumber(pool), poolPct: fPct(poolShare, 4), weightSum: fText(wsum), rows };
+    });
+    return { sections: out, entitledF, perPerson, issues };
+  }
+  /** تسویه‌ی پیشنهادی: بدهکارها (بیش از حق برداشته‌اند) به طلبکارها (کمتر از حق دارند) پول بدهند؛ کمترین تعداد پرداخت به‌صورت حریصانه */
+  function settlementPlan(res, diffs) {
+    const cred = [], debt = [];
+    res.forEach((r, i) => { const d = diffs[i]; if (fSign(d) < 0) cred.push({ i, amt: fNeg(d) }); else if (fSign(d) > 0) debt.push({ i, amt: d }); });
+    cred.sort((a, b) => fCmp(b.amt, a.amt)); debt.sort((a, b) => fCmp(b.amt, a.amt));
+    const out = []; let ci = 0, di = 0;
+    while (ci < cred.length && di < debt.length) {
+      const c = cred[ci], d = debt[di], m = fCmp(c.amt, d.amt) < 0 ? c.amt : d.amt;
+      out.push({ from: res[d.i].person.id, fromName: res[d.i].person.name, to: res[c.i].person.id, toName: res[c.i].person.name, amount: Math.round(fToNumber(m)), amountExact: fToNumber(m) });
+      c.amt = fSub(c.amt, m); d.amt = fSub(d.amt, m);
+      if (fSign(c.amt) === 0) ci++;
+      if (fSign(d.amt) === 0) di++;
+    }
+    return out;
+  }
+
+  /**
    * ارزیابی سناریو با حساب دقیق:
    * pool (ارزش کل)، حق هر شخص، دریافتی، اختلاف، جمع سهم‌ها و کنترل‌های درستی.
    * گردکردن فقط در فیلدهای نمایشی (entitled/received/diff) انجام می‌شود.
    */
   function evaluateScenario(state, sc) {
-    const persons = state.persons || [];
-    const poolIds = Object.keys(sc.parcels);
+    // پرونده‌ی زنده: زمین‌ها از اطلاعات فعلی خوانده می‌شوند؛ سناریوی قدیمی: عکس ثابت
+    const live = !!sc.live;
+    const snap = live ? caseParcels(state, sc) : sc.parcels;
+    const allPersons = state.persons || [];
+    const persons = sc.personIds ? allPersons.filter(p => sc.personIds.indexOf(p.id) >= 0) : allPersons;
+    const poolIds = Object.keys(snap);
     const errors = [];
+    if (live) {
+      const gone = (sc.parcelIds || []).filter(id => !snap[id]);
+      if (gone.length) errors.push(gone.length + ' زمین این پرونده از برنامه حذف شده است؛ از فهرست پرونده خارجش کنید.');
+    }
     // ارزش کل مجموعه: total ها عدد صحیح‌اند ⇒ جمع دقیق
-    let poolF = F0();
+    let poolF = F0(), areaAll = 0;
     const incomplete = [];
     poolIds.forEach(id => {
-      const tt = sc.parcels[id].total;
+      const tt = snap[id].total;
       if (isNum(tt)) poolF = fAdd(poolF, frac(Math.round(tt)));
-      else incomplete.push(sc.parcels[id].name || id);
+      else incomplete.push(snap[id].name || id);
+      if (isNum(snap[id].area)) areaAll += snap[id].area;
     });
     if (incomplete.length) errors.push('زمین‌های بدون ارزش قطعی در مجموع لحاظ نشده‌اند: ' + incomplete.join('، '));
 
-    // وزن‌ها و حق هر شخص (دقیق)
-    const wFs = persons.map(personWeightFrac);
-    let wSum = F0(); wFs.forEach(w => { wSum = fAdd(wSum, w); });
-    const entitledF = persons.map((p, i) => (fSign(wSum) > 0 ? fDiv(fMul(poolF, wFs[i]), wSum) : F0()));
+    // حق هر شخص (دقیق): یا از بخش‌ها (جمع وزنی بخش‌ها) یا از سهم نسبی ساده‌ی شخص
+    let wFs, wSum, entitledF, sectionsOut = null, secShare = null, sectionIssues = 0;
+    if (sc.sections && sc.sections.length) {
+      const plan = sectionPlan(sc, snap, persons, poolF, errors);
+      sectionsOut = plan.sections; entitledF = plan.entitledF; secShare = plan.perPerson; sectionIssues = plan.issues;
+      wSum = F1();
+      wFs = persons.map((p, i) => (fSign(poolF) > 0 ? fDiv(entitledF[i], poolF) : F0()));
+    } else {
+      wFs = persons.map(personWeightFrac);
+      wSum = F0(); wFs.forEach(w => { wSum = fAdd(wSum, w); });
+      entitledF = persons.map((p, i) => (fSign(wSum) > 0 ? fDiv(fMul(poolF, wFs[i]), wSum) : F0()));
+    }
 
     const res = persons.map((p, i) => ({
       person: p, index: i, weightFrac: wFs[i],
@@ -1062,7 +1229,7 @@
     const alloc = sc.allocations || {};
     poolIds.forEach(id => {
       const al = alloc[id] || [];
-      const sp = sc.parcels[id];
+      const sp = snap[id];
       const totalF = isNum(sp.total) ? frac(Math.round(sp.total)) : F0();
       let sum = F0();
       al.forEach(x => {
@@ -1094,12 +1261,60 @@
         under.push({ id, name: sp.name, remaining: rem, value: fMul(totalF, rem) });
       }
     });
-    if (orphan.length) errors.push('سهم‌هایی به اشخاص حذف‌شده تعلق دارند و در جمع لحاظ نشدند (' + orphan.length + ' مورد) — آن‌ها را پاک یا شخص را دوباره ثبت کنید.');
+    if (orphan.length) errors.push('سهم‌هایی به اشخاص حذف‌شده یا خارج از پرونده تعلق دارند و در جمع لحاظ نشدند (' + orphan.length + ' مورد) — آن‌ها را پاک یا شخص را به پرونده اضافه کنید.');
+
+    /* معامله‌های جانبی (زمین یا پول بین دو نفر) و فهرست نهایی زمین‌های هر شخص */
+    const hold = {}, notes = {}, cashNet = {}, dealLines = {}, dealErrors = [];
+    res.forEach(r => { hold[r.person.id] = {}; notes[r.person.id] = {}; cashNet[r.person.id] = F0(); dealLines[r.person.id] = []; });
+    poolIds.forEach(id => (alloc[id] || []).forEach(x => {
+      if (!hold[x.personId]) return;
+      const f = allocFrac(x);
+      if (fSign(f) > 0) hold[x.personId][id] = fAdd(hold[x.personId][id] || F0(), f);
+    }));
+    const nameOf = (pid) => { const r = res.find(z => z.person.id === pid); return r ? r.person.name : '؟'; };
+    (sc.deals || []).forEach((d, di) => {
+      const tag = 'معامله‌ی ' + (di + 1);
+      if (!hold[d.from] || !hold[d.to] || d.from === d.to) { dealErrors.push(tag + ': طرفین معامله باید دو نفر متفاوت از اعضای پرونده باشند'); return; }
+      if (d.kind === 'cash') {
+        const m = toFrac(d.amount);
+        if (!m || fSign(m) <= 0) { dealErrors.push(tag + ': مبلغ نامعتبر است'); return; }
+        cashNet[d.from] = fSub(cashNet[d.from], m); cashNet[d.to] = fAdd(cashNet[d.to], m);
+        const mt = Math.round(fToNumber(m)).toLocaleString('en');
+        dealLines[d.from].push('پرداخت ' + mt + ' تومان به ' + nameOf(d.to) + (d.note ? ' (' + d.note + ')' : ''));
+        dealLines[d.to].push('دریافت ' + mt + ' تومان از ' + nameOf(d.from) + (d.note ? ' (' + d.note + ')' : ''));
+        return;
+      }
+      const sp = snap[d.parcelId];
+      if (!sp) { dealErrors.push(tag + ': زمین معامله در پرونده نیست'); return; }
+      const have = hold[d.from][d.parcelId] || F0();
+      const f = d.all ? have : toFrac({ num: d.num, den: d.den });
+      if (!f || fSign(f) <= 0) { dealErrors.push(tag + ': ' + nameOf(d.from) + ' سهمی از «' + sp.name + '» ندارد'); return; }
+      if (fCmp(f, have) > 0) { dealErrors.push(tag + ': سهم واگذارشده‌ی «' + sp.name + '» (' + fText(f) + ') از سهم ' + nameOf(d.from) + ' (' + fText(have) + ') بیشتر است'); return; }
+      const left = fSub(have, f);
+      if (fSign(left) === 0) delete hold[d.from][d.parcelId]; else hold[d.from][d.parcelId] = left;
+      hold[d.to][d.parcelId] = fAdd(hold[d.to][d.parcelId] || F0(), f);
+      (notes[d.to][d.parcelId] = notes[d.to][d.parcelId] || []).push(fText(f) + ' از ' + nameOf(d.from));
+      (notes[d.from][d.parcelId] = notes[d.from][d.parcelId] || []).push(fText(f) + ' به ' + nameOf(d.to) + ' واگذار شد');
+      dealLines[d.from].push('واگذاری ' + fText(f) + ' از «' + sp.name + '» به ' + nameOf(d.to) + (d.note ? ' (' + d.note + ')' : ''));
+      dealLines[d.to].push('دریافت ' + fText(f) + ' از «' + sp.name + '» از ' + nameOf(d.from) + (d.note ? ' (' + d.note + ')' : ''));
+    });
+    dealErrors.forEach(e => errors.push(e));
+    res.forEach(r => {
+      const h = hold[r.person.id]; let valF = F0(), area = 0; const lines = [];
+      poolIds.forEach(id => {
+        const f = h[id]; if (!f || fSign(f) <= 0) return;
+        const sp = snap[id], totalF = isNum(sp.total) ? frac(Math.round(sp.total)) : F0();
+        const v = fMul(totalF, f), ar = (isNum(sp.area) ? sp.area : 0) * fToNumber(f);
+        valF = fAdd(valF, v); area += ar;
+        lines.push({ id, name: sp.name, scope: sp.scope, fractionText: fText(f), pct: fPct(f, 4), area: ar, value: Math.round(fToNumber(v)), valueExact: fToNumber(v), note: (notes[r.person.id][id] || []).join('؛ ') });
+      });
+      r.finalLines = lines; r.finalValueF = valF; r.finalArea = area; r.cashNetF = cashNet[r.person.id]; r.dealLines = dealLines[r.person.id];
+    });
 
     const unallocated = under.map(u => ({
       id: u.id, name: u.name, remaining: fToNumber(u.remaining),
       remainingPct: fPct(u.remaining, 4), remainingFrac: fText(u.remaining),
-      value: Math.round(fToNumber(fMul(sc.parcels[u.id].total != null ? frac(Math.round(sc.parcels[u.id].total)) : F0(), u.remaining))),
+      value: Math.round(fToNumber(fMul(snap[u.id].total != null ? frac(Math.round(snap[u.id].total)) : F0(), u.remaining))),
       valueF: u.value,
     }));
     // ارزش واگذارنشده (دقیق) برای کنترل تراز
@@ -1110,6 +1325,11 @@
     let recvTotal = F0(), entTotal = F0();
     res.forEach(r => { recvTotal = fAdd(recvTotal, r.receivedF); entTotal = fAdd(entTotal, r.entitledF); });
 
+    // مانده‌ی نهایی هر شخص پس از معامله‌ها: ارزش زمین‌های فعلی + پول دریافتی − پول پرداختی − حق او (مثبت = بیش از حق، منفی = کسری)
+    const finalDiffF = res.map(r => fAdd(fSub(r.finalValueF, r.entitledF), r.cashNetF));
+    let diffTotalF = F0(); finalDiffF.forEach(d => { diffTotalF = fAdd(diffTotalF, d); });
+    const avgPrice = areaAll > 0 ? fToNumber(poolF) / areaAll : 0;
+    const settlement = settlementPlan(res, finalDiffF);
     // گردکردن فقط برای نمایش
     res.forEach(r => {
       const diffF = fSub(r.receivedF, r.entitledF);
@@ -1122,9 +1342,16 @@
       r.entitledPct = fPct(r.entitledShare, 4);
       r.diffPct = fSign(r.entitledF) !== 0 ? fToNumber(fDiv(diffF, r.entitledF)) * 100 : 0;
       r.specialValue = Math.round(fToNumber(r.specialValueF));
+      const fd = finalDiffF[r.index];
+      r.finalValue = Math.round(fToNumber(r.finalValueF)); r.cashNet = Math.round(fToNumber(r.cashNetF));
+      r.finalDiffExact = fToNumber(fd); r.finalDiff = Math.round(r.finalDiffExact);
+      r.short = -r.finalDiff;                       // مثبت: هنوز باید بگیرد، منفی: بیش از حق دارد
+      r.shortPct = r.entitledExact ? (-r.finalDiffExact / r.entitledExact) * 100 : 0;
+      r.shortArea = avgPrice > 0 ? -r.finalDiffExact / avgPrice : 0;   // معادل تقریبی مساحت با میانگین قیمت همین پرونده
+      r.sections = secShare ? secShare[r.index] : [];
       // اگر گردکردنِ نمایشی با اختلاف دقیق یکی نباشد، همان مقدار دقیق ملاک است
       if (r.received - r.entitled !== r.diff) r.diffNote = 'اختلاف دقیق: ' + fNum(diffF, 2) + ' تومان (نمایش گردشده)';
-      delete r.weightFrac; delete r.entitledF; delete r.receivedF; delete r.specialValueF;
+      delete r.weightFrac; delete r.entitledF; delete r.receivedF; delete r.specialValueF; delete r.finalValueF; delete r.cashNetF;
       r.parcels.forEach(q => { q.value = Math.round(q.value); delete q.valueF; });
       Object.keys(r.byScope).forEach(k => { r.byScope[k].value = Math.round(r.byScope[k].value); });
       Object.keys(r.byAgri).forEach(k => { r.byAgri[k].value = Math.round(r.byAgri[k].value); });
@@ -1160,13 +1387,25 @@
         msg: incomplete.length === 0 ? 'همه‌ی زمین‌های سناریو ارزش قطعی دارند' : incomplete.length + ' زمین ارزش قطعی ندارد: ' + incomplete.join('، '),
       },
     ];
+    if (sectionsOut) checks.push({
+      id: 'sections_ok', ok: sectionIssues === 0,
+      msg: sectionIssues === 0 ? 'هر زمین دقیقاً در یک بخش است و برای هر بخش سهم تعیین شده' : 'مشکل در بخش‌ها (بالا ببینید)',
+    });
+    if ((sc.deals || []).length) checks.push({
+      id: 'deals_ok', ok: dealErrors.length === 0,
+      msg: dealErrors.length === 0 ? 'معامله‌های جانبی درست‌اند (' + (sc.deals || []).length + ' مورد)' : dealErrors.join(' — '),
+    });
     const exact = {
       poolFrac: fText(poolF), allocatedFrac: fText(allocatedF), unallocatedFrac: fText(unallocatedF),
-      sums: poolIds.map(id => ({ id, name: sc.parcels[id].name, sum: fText(used[id]), pct: fPct(used[id], 4), full: fEq(used[id], F1()) })),
+      sums: poolIds.map(id => ({ id, name: snap[id].name, sum: fText(used[id]), pct: fPct(used[id], 4), full: fEq(used[id], F1()) })),
       weights: persons.map((p, i) => ({ id: p.id, name: p.name, weight: fText(wFs[i]), share: fText(fSign(wSum) > 0 ? fDiv(wFs[i], wSum) : F0()), pct: fSign(wSum) > 0 ? fPct(fDiv(wFs[i], wSum), 4) : '0' })),
       weightSum: fText(wSum),
     };
-    return { pool: Math.round(pool), poolExact: pool, results: res, unallocated, over, orphan, errors, checks, exact };
+    return {
+      pool: Math.round(pool), poolExact: pool, results: res, unallocated, over, orphan, errors, checks, exact,
+      live, sections: sectionsOut, settlement, settlementBalanced: fSign(diffTotalF) === 0,
+      unsettled: Math.round(-fToNumber(diffTotalF)), area: areaAll, avgPricePerM2: avgPrice,
+    };
   }
 
   /* ---------------------------------------------------------------- */
@@ -1184,6 +1423,8 @@
     defaultSettings, cellKey, suggestRuralGrade, featureScore, valuate, applyValuation, newParcel,
     newState, addParcel, saveParcel, updateSettings,
     addPerson, setPersonWeight, personWeightFrac, createScenario,
+    // پرونده‌ی زنده
+    parcelSnap, caseParcels, createCase, convertScenarioToCase, addSection, setSectionWeight, sectionWeightFrac, addDeal, removePerson,
     setAllocation, setEqualAllocation, allocFrac, allocSum, evaluateScenario,
   };
 });

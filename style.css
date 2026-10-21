@@ -157,3 +157,10 @@ body.map-focus #mapwrap{flex:1 1 auto}
   .sum .grid{grid-template-columns:1fr}
   .modal{max-height:94vh}
 }
+
+@media print{
+  body.printing>*:not(#print-area){display:none!important}
+  body.printing #print-area{display:block!important}
+  #print-area{padding:10px;font-size:12px}
+}
+#print-area{display:none}
