@@ -340,6 +340,14 @@ t('پرونده‌ی زنده: ساخت، بخش‌ها، واگذاری، مع�
   let ev = C.evaluateScenario(S, sc);
   const r1 = ev.results.find(r => r.person.id === P1.id), r2 = ev.results.find(r => r.person.id === P2.id);
   near(r2.short, 1750000000, 1, 'کسری بابک');
+  // پنل حساب هر نفر در مرحله‌ی واگذاری: تعدیل +/− و مانده‌ی اعتبار زنده
+  click(doc.querySelector('[data-ct=alloc]'));
+  ok(doc.getElementById('credit-table'), 'پنل حساب هر نفر نیست');
+  const rowB = doc.querySelector('#credit-table [data-pid="' + P2.id + '"]');
+  const adjIn = rowB.querySelector('input'); adjIn.value = '+500000000'; adjIn.dispatchEvent(new w.Event('change'));
+  ok(sc.adjust && sc.adjust[P2.id] === '+500000000', 'تعدیل ثبت نشد');
+  const rowB2 = doc.querySelector('#credit-table [data-pid="' + P2.id + '"]');
+  ok(/۲٬۲۵۰٬۰۰۰٬۰۰۰/.test(rowB2.textContent), 'مانده‌ی اعتبار بابک ۲٬۲۵۰٬۰۰۰٬۰۰۰ نیست: ' + rowB2.textContent.slice(0, 200));
   // معامله‌ی نقدی از علی به بابک
   click(doc.querySelector('[data-ct=deals]'));
   const sels = doc.querySelectorAll('#case-view select');

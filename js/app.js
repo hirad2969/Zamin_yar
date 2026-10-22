@@ -20,9 +20,22 @@
   App.load = function () {
     try {
       const t = localStorage.getItem(KEY);
-      if (t) { const s = JSON.parse(t); if (s && s.schema === 1 && s.settings && Array.isArray(s.parcels)) return App.normalize(s); }
+      if (t) {
+        const s = JSON.parse(t);
+        if (s && s.schema === 1 && s.settings && Array.isArray(s.parcels)) {
+          if (!s.parcels.length && !(s.persons || []).length && !(s.scenarios || []).length) { const d = App.seedOnce(); if (d) return App.normalize(d); }
+          return App.normalize(s);
+        }
+      }
     } catch (e) { App.storageOk = false; }
-    return C.newState();
+    return App.normalize(App.seedOnce()) || C.newState();
+  };
+  /** فهرست پیش‌فرض زمین‌ها (js/seed.js): فقط یک بار، وقتی برنامه خالی باز می‌شود */
+  App.seedState = function () { return window.ZY_SEED ? JSON.parse(JSON.stringify(window.ZY_SEED)) : null; };
+  App.seedOnce = function () {
+    if (window.ZY_NOSEED || !window.ZY_SEED) return null;
+    try { if (localStorage.getItem(KEY + '-seeded')) return null; localStorage.setItem(KEY + '-seeded', '1'); } catch (e) { /* بدون حافظه هم بارگذاری می‌شود */ }
+    return App.seedState();
   };
   App.save = function () {
     try { localStorage.setItem(KEY, JSON.stringify(App.S)); App.storageOk = true; }

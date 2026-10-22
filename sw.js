@@ -1,9 +1,9 @@
 /* سرویس‌ورکر: برنامه بدون اینترنت باز می‌شود؛ کاشی‌های نقشه‌ی دیده‌شده هم ذخیره می‌شوند */
-const VER = 'zy-v5';
+const VER = 'zy-v6';
 const SHELL = ['./', 'index.html', 'style.css', 'core.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
   'vendor/leaflet.js', 'vendor/leaflet.css', 'vendor/proj4.js', 'vendor/xlsx.full.min.js', 'vendor/jszip.min.js',
   'vendor/images/marker-icon.png', 'vendor/images/marker-icon-2x.png', 'vendor/images/marker-shadow.png', 'vendor/images/layers.png', 'vendor/images/layers-2x.png',
-  'js/app.js', 'js/map.js', 'detect.js', 'js/autodetect.js', 'js/split.js', 'js/importer.js', 'js/gps.js', 'js/form.js', 'js/parcels.js', 'js/settings.js', 'js/cases.js', 'js/people.js', 'js/project.js'];
+  'js/seed.js', 'js/app.js', 'js/map.js', 'detect.js', 'js/autodetect.js', 'js/split.js', 'js/importer.js', 'js/gps.js', 'js/form.js', 'js/parcels.js', 'js/settings.js', 'js/cases.js', 'js/people.js', 'js/project.js'];
 const TILE = /(arcgisonline\.com|tile\.openstreetmap\.org)/;
 const MAX_TILES = 1500;
 

@@ -47,6 +47,36 @@
     ]);
   }
 
+
+  /* ---------- «حساب هر نفر»: حق + تعدیل (+/−) − زمین‌های انتخاب‌شده = مانده‌ی اعتبار ---------- */
+  function creditPanel(sc, ev, onAdj) {
+    const wrap = el('div', { class: 'card', id: 'credit-panel', style: 'background:#f8faf5;border:2px solid var(--pri)' });
+    wrap.appendChild(el('h3', { style: 'margin-top:0', text: 'حساب هر نفر (زنده)' }));
+    wrap.appendChild(el('div', { class: 'note', text: 'جلوی «تعدیل» می‌توانید + یا − بنویسید؛ مثلاً -9000000000 بابت خرید (کم می‌شود) یا +3000000000 بابت فروش (اضافه می‌شود). هر زمینی که برای کسی انتخاب شود همین‌جا کنار نامش می‌آید و ارزشش از اعتبارش کم می‌شود.' }));
+    if (!ev) { wrap.appendChild(el('div', { class: 'box err', text: 'محاسبه ممکن نشد.' })); return wrap; }
+    wrap.appendChild(el('div', { id: 'credit-table', style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px' }, ev.results.map(x => {
+      const rem = x.remaining;
+      const row = (k, v, cls) => el('div', { style: 'display:flex;justify-content:space-between;gap:8px;border-bottom:1px dotted var(--line);padding:3px 0' }, [el('span', { class: 'note', text: k }), el('b', { class: cls || '', text: v })]);
+      return el('div', { 'data-pid': x.person.id, style: 'background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px' }, [
+        el('div', { style: 'font-size:16px;font-weight:700;margin-bottom:4px', text: x.person.name }),
+        row('حق از بخش‌ها', toman(x.entitledExact) + ' تومان'),
+        el('div', { style: 'display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px dotted var(--line)' }, [el('span', { class: 'note', style: 'white-space:nowrap', text: 'تعدیل (+/−)' }),
+          el('input', { type: 'text', dir: 'ltr', value: x.adjustText || '', placeholder: 'مبلغ با + یا −', onchange: (e) => {
+            const v = e.target.value.trim();
+            if (C.parseAdjust(v) === null) { App.toast('نامعتبر است؛ مثل +3000000000 یا -9000000000 بنویسید', 'warn'); return; }
+            sc.adjust = sc.adjust || {}; if (v) sc.adjust[x.person.id] = v; else delete sc.adjust[x.person.id];
+            App.save(); onAdj();
+          } })]),
+        row('اعتبار خرید', toman(x.creditExact) + ' تومان'),
+        el('div', { class: 'note', style: 'margin-top:4px', text: 'زمین‌های انتخاب‌شده:' }),
+        x.finalLines.length ? el('div', { style: 'max-height:150px;overflow:auto' }, x.finalLines.map(l => el('div', { style: 'font-size:12px;border-bottom:1px dotted var(--line);padding:2px 0' }, l.name + (l.fractionText !== '1' ? ' (' + fa(l.fractionText) + ')' : '') + ' — ' + toman(l.valueExact)))) : el('div', { class: 'note', text: '— هنوز زمینی نگرفته —' }),
+        row('جمع ارزش زمین‌ها', toman(x.finalValue) + ' تومان'),
+        el('div', { class: rem >= 0 ? 'pos' : 'neg', style: 'font-size:17px;margin-top:6px;text-align:center', html: (rem >= 0 ? 'مانده‌ی اعتبار: ' : 'بیش از اعتبار: ') + '<b>' + toman(Math.abs(rem)) + '</b> تومان' }),
+      ]);
+    })));
+    return wrap;
+  }
+
   /* ---------- صفحه‌ی اصلی بخش پرونده‌ها ---------- */
   function mount(r, rerenderAll) {
     const S = App.S;
@@ -143,8 +173,13 @@
         ])));
         body.appendChild(card);
       });
+      const est = (S.estates || []);
+      const fromEstates = est.length ? el('button', { class: 'btn sec2', id: 'sec-estates', text: 'گرفتن بخش‌ها از «دسته‌های اموال»', onclick: () => {
+        const n = C.sectionsFromEstates(S, sc); save(); redraw(); App.toast(App.n(n, 0) + ' بخش از دسته‌های اموال ساخته شد', 'ok');
+      } }) : null;
       const phrase = el('input', { type: 'text', placeholder: 'ساخت بخش از زمین‌هایی که توضیحاتشان شامل این عبارت است' });
       body.appendChild(el('div', { class: 'row' }, [
+        fromEstates,
         el('button', { class: 'btn sec2', id: 'sec-add', text: '+ بخش خالی', onclick: () => { C.addSection(sc, 'بخش ' + App.n((sc.sections || []).length + 1, 0)); save(); redraw(); } }),
         el('div', { class: 'grow' }, phrase),
         el('button', { class: 'btn sec2', text: 'ساخت بخش با عبارت', onclick: () => {
@@ -154,6 +189,7 @@
           (sc.sections || []).forEach(s => { if (s.parcelIds) s.parcelIds = s.parcelIds.filter(x => ids.indexOf(x) < 0); });
           C.addSection(sc, phrase.value.trim(), { parcelIds: ids }); save(); redraw(); App.toast(App.n(ids.length, 0) + ' زمین در بخش جدید قرار گرفت', 'ok');
         } })]));
+      body.appendChild(creditPanel(sc, ev, redraw));
       if (ev && ev.errors.length) ev.errors.forEach(e => body.appendChild(el('div', { class: 'box err', text: e })));
     }
 
@@ -163,13 +199,17 @@
       const ps = S.parcels.filter(p => (sc.parcelIds || []).indexOf(p.id) >= 0);
       if (!persons.length || !ps.length) { body.appendChild(el('div', { class: 'box warn', text: 'زمین و اشخاص پرونده را در مرحله‌ی ۱ انتخاب کنید.' })); return; }
       body.appendChild(el('div', { class: 'box info', text: 'هر زمین را به هرکس که الان در دست اوست بدهید. سهم را به کسر دقیق (۱/۳) یا درصد (۵۰) بنویسید؛ «کل زمین» یعنی ۱۰۰٪ به یک نفر. این جدول «وضعیت فعلی» است؛ کسری هر نفر در مرحله‌ی ۵ نسبت به حق او نشان داده می‌شود.' }));
+      const panelBox = el('div');
+      const refreshPanel = () => { panelBox.innerHTML = ''; panelBox.appendChild(creditPanel(sc, evalSafe(sc), refreshPanel)); };
+      body.appendChild(panelBox); refreshPanel();
       const rows = ps.map(p => {
         const v = p.valuation || {};
         const sum = C.allocSum(sc, p.id), cmp = C.fCmp(sum, C.frac(1));
         const whole = el('select', { onchange: (e) => { if (!e.target.value) return; C.setAllocation(sc, p.id, e.target.value, 1); (sc.allocations[p.id] || []).forEach(() => { }); const keep = (sc.allocations[p.id] || []).filter(a => a.personId === e.target.value); sc.allocations[p.id] = keep; save(); redraw(); } },
           [el('option', { value: '', text: 'کل زمین به…' })].concat(persons.map(q => el('option', { value: q.id, text: q.name }))));
+        const sumTd = el('td', { class: cmp === 0 ? 'pos' : cmp > 0 ? 'neg' : '', text: fa(C.fPct(sum, 2)) + '٪' });
         return el('tr', null, [el('td', { class: 'l', text: p.name || '—' }), el('td', { text: App.n(v.area, 0) }), el('td', { text: toman(v.total || 0) }),
-          el('td', { class: cmp === 0 ? 'pos' : cmp > 0 ? 'neg' : '', text: fa(C.fPct(sum, 2)) + '٪' }),
+          sumTd,
           ...persons.map(q => {
             const a = ((sc.allocations || {})[p.id] || []).find(x => x.personId === q.id);
             const f = a ? C.allocFrac(a) : null;
@@ -179,7 +219,8 @@
               else if (s.error) App.toast(s.error, 'warn');
               else if (C.fCmp(s.frac, C.frac(1)) > 0) App.toast('بیشتر از ۱۰۰٪ نمی‌شود', 'warn');
               else C.setAllocation(sc, p.id, q.id, s.frac, { text: s.kind === 'ratio' ? s.text : s.pct });
-              save(); redraw();
+              save(); refreshPanel();
+              const sm = C.allocSum(sc, p.id); sumTd.textContent = fa(C.fPct(sm, 2)) + '٪'; sumTd.className = C.fCmp(sm, C.frac(1)) === 0 ? 'pos' : C.fCmp(sm, C.frac(1)) > 0 ? 'neg' : '';
             } }));
           }),
           el('td', null, el('div', { class: 'row' }, [whole, el('button', { class: 'btn sm sec2', text: 'برابر', onclick: () => { C.setEqualAllocation(sc, p.id, persons.map(x => x.id)); save(); redraw(); } })]))]);
@@ -237,6 +278,7 @@
       if (!ev) { body.appendChild(el('div', { class: 'box err', text: 'محاسبه ممکن نشد؛ ورودی‌ها را بازبینی کنید.' })); return; }
       body.appendChild(el('div', { class: 'row' }, [
         el('button', { class: 'btn', id: 'res-print', text: '🖨 چاپ', onclick: () => printResult(sc, ev) }),
+        el('button', { class: 'btn sec2', id: 'res-html', text: '💾 ذخیره‌ی برگه', onclick: () => saveSheet(sc, ev) }),
         el('button', { class: 'btn sec2', id: 'res-xlsx', text: '📊 خروجی اکسل', onclick: () => exportXlsx(sc, ev) }),
         el('button', { class: 'btn sec2', id: 'res-copy', text: '📋 کپی متن', onclick: () => copyText(sc, ev) })]));
       const bad = ev.checks.filter(c => !c.ok);
@@ -248,10 +290,10 @@
         el('tbody', null, ev.sections.map(s => el('tr', null, [el('td', { class: 'l', text: s.name }), el('td', { text: App.n(s.count, 0) }), el('td', { text: App.n(s.area, 0) }), el('td', { text: toman(s.poolExact) }), el('td', { text: fa(s.poolPct) + '٪' })])))])));
       body.appendChild(el('h3', { text: 'حق هر نفر و کسری' }));
       body.appendChild(el('div', { class: 'scroll' }, el('table', { class: 't', id: 'res-table' }, [
-        el('thead', null, el('tr', null, ['شخص', 'حق از کل (٪)', 'حق (تومان)', 'ارزش زمین‌های فعلی', 'پول (+دریافت/−پرداخت)', 'وضعیت', 'مبلغ (تومان)', '٪ حق', '≈ مساحت (م²)'].map(h => el('th', { text: h })))),
+        el('thead', null, el('tr', null, ['شخص', 'حق از کل (٪)', 'حق (تومان)', 'تعدیل', 'اعتبار', 'ارزش زمین‌های فعلی', 'پول (+دریافت/−پرداخت)', 'وضعیت', 'مبلغ (تومان)', '٪ حق', '≈ مساحت (م²)'].map(h => el('th', { text: h })))),
         el('tbody', null, ev.results.map(x => {
           const short = x.short > 0 ? 'کسری دارد' : x.short < 0 ? 'بیش از حق دارد' : 'تسویه';
-          return el('tr', null, [el('td', { class: 'l', text: x.person.name }), el('td', { text: fa(x.entitledPct) + '٪' }), el('td', { text: toman(x.entitledExact) }), el('td', { text: toman(x.finalValue) }), el('td', { text: (x.cashNet > 0 ? '+' : '') + toman(x.cashNet) }),
+          return el('tr', null, [el('td', { class: 'l', text: x.person.name }), el('td', { text: fa(x.entitledPct) + '٪' }), el('td', { text: toman(x.entitledExact) }), el('td', { text: (x.adjust > 0 ? '+' : '') + toman(x.adjust) }), el('td', { text: toman(x.creditExact) }), el('td', { text: toman(x.finalValue) }), el('td', { text: (x.cashNet > 0 ? '+' : '') + toman(x.cashNet) }),
             el('td', { class: x.short > 0 ? 'neg' : x.short < 0 ? 'pos' : '', text: short }), el('td', { class: x.short > 0 ? 'neg' : 'pos', text: toman(Math.abs(x.short)) }), el('td', { text: App.n(Math.abs(x.shortPct), 2) + '٪' }), el('td', { text: App.n(Math.abs(x.shortArea), 0) })]);
         }))])));
       body.appendChild(el('div', { class: 'note', text: 'کسری = مقداری که این نفر هنوز باید بگیرد تا به حق خود برسد؛ «بیش از حق» یعنی باید به دیگران بدهد. مساحت معادل با میانگین قیمت همین پرونده تقریب زده می‌شود.' }));
@@ -275,7 +317,7 @@
       el('tbody', null, x.finalLines.map((l, i) => el('tr', null, [el('td', { text: App.n(i + 1, 0) }), el('td', { class: 'l', text: l.name }), el('td', { text: fa(l.fractionText) }), el('td', { text: App.n(l.area, 1) }), el('td', { text: toman(l.valueExact) }), el('td', { class: 'l', text: l.note })])))])));
     else wrap.appendChild(el('div', { class: 'note', text: 'زمینی ندارد.' }));
     if (x.dealLines.length) wrap.appendChild(el('div', { class: 'note', text: 'معامله‌ها: ' + x.dealLines.join(' | ') }));
-    wrap.appendChild(el('div', { class: x.short > 0 ? 'neg' : 'pos', text: 'حق: ' + toman(x.entitledExact) + ' تومان — ' + (x.short > 0 ? 'کسری: ' + toman(x.short) + ' تومان' : x.short < 0 ? 'بیش از حق: ' + toman(-x.short) + ' تومان' : 'تسویه') }));
+    wrap.appendChild(el('div', { class: x.short > 0 ? 'neg' : 'pos', text: 'حق: ' + toman(x.entitledExact) + (x.adjust ? ' ' + (x.adjust > 0 ? '+' : '−') + ' ' + toman(Math.abs(x.adjust)) + ' = ' + toman(x.creditExact) : '') + ' تومان — ' + (x.short > 0 ? 'کسری: ' + toman(x.short) + ' تومان' : x.short < 0 ? 'بیش از حق: ' + toman(-x.short) + ' تومان' : 'تسویه') }));
     return wrap;
   }
 
@@ -283,7 +325,7 @@
   function textOf(sc, ev) {
     const L = ['پرونده: ' + sc.name, 'ارزش کل: ' + toman(ev.poolExact) + ' تومان', ''];
     ev.results.forEach(x => {
-      L.push('■ ' + x.person.name + ' — حق: ' + fa(x.entitledPct) + '٪ = ' + toman(x.entitledExact) + ' تومان');
+      L.push('■ ' + x.person.name + ' — حق: ' + fa(x.entitledPct) + '٪ = ' + toman(x.entitledExact) + ' تومان' + (x.adjust ? ' | تعدیل: ' + (x.adjust > 0 ? '+' : '−') + toman(Math.abs(x.adjust)) + ' | اعتبار: ' + toman(x.creditExact) : ''));
       x.finalLines.forEach((l, i) => L.push('  ' + App.n(i + 1, 0) + ') ' + l.name + ' — سهم ' + fa(l.fractionText) + ' — ' + App.n(l.area, 1) + ' م² — ' + toman(l.valueExact) + ' تومان' + (l.note ? ' (' + l.note + ')' : '')));
       x.dealLines.forEach(d => L.push('  ◦ ' + d));
       L.push('  جمع زمین‌ها: ' + toman(x.finalValue) + ' تومان — ' + (x.short > 0 ? 'کسری: ' + toman(x.short) + ' تومان' : x.short < 0 ? 'بیش از حق: ' + toman(-x.short) + ' تومان' : 'تسویه'), '');
@@ -301,14 +343,25 @@
     try { document.execCommand('copy'); ok(); } catch (e) { App.modal({ title: 'متن را کپی کنید', body: el('textarea', { style: 'min-height:260px', value: t }) }); }
     ta.remove();
   }
-  function printResult(sc, ev) {
-    const area = el('div', { id: 'print-area', dir: 'rtl' }, [el('h2', { text: sc.name }), el('div', { text: 'ارزش کل: ' + toman(ev.poolExact) + ' تومان' })].concat(ev.results.map(personList)));
-    document.body.appendChild(area); document.body.classList.add('printing');
-    const done = () => { document.body.classList.remove('printing'); area.remove(); window.removeEventListener('afterprint', done); };
-    window.addEventListener('afterprint', done);
-    try { window.print(); } catch (e) { done(); App.toast('چاپ در این دستگاه ممکن نیست؛ از «کپی متن» یا «اکسل» استفاده کنید.', 'warn'); }
-    setTimeout(() => { if (document.getElementById('print-area')) done(); }, 60000);
+  function sheetHtml(sc, ev) {
+    const E = App.esc, T = toman;
+    let h = '<h1>' + E(sc.name) + '</h1><div class="note">ارزش کل: ' + T(ev.poolExact) + ' تومان — مساحت: ' + App.n(ev.area, 0) + ' م²</div>';
+    h += '<h2>خلاصه‌ی حساب هر نفر</h2><table><thead><tr><th class="l">شخص</th><th>حق (تومان)</th><th>تعدیل</th><th>اعتبار</th><th>ارزش زمین‌ها</th><th>مانده / کسری</th></tr></thead><tbody>';
+    ev.results.forEach(x => { h += '<tr><td class="l">' + E(x.person.name) + '</td><td>' + T(x.entitledExact) + '</td><td>' + (x.adjust > 0 ? '+' : '') + T(x.adjust) + '</td><td>' + T(x.creditExact) + '</td><td>' + T(x.finalValue) + '</td><td class="' + (x.short > 0 ? 'neg' : 'pos') + '">' + (x.short > 0 ? 'کسری ' + T(x.short) : x.short < 0 ? 'بیش از حق ' + T(-x.short) : 'تسویه') + '</td></tr>'; });
+    h += '</tbody></table>';
+    ev.results.forEach(x => {
+      h += '<div class="person"><h3>' + E(x.person.name) + ' — جمع: ' + T(x.finalValue) + ' تومان، ' + App.n(x.finalArea, 0) + ' م²</h3>';
+      if (x.finalLines.length) { h += '<table><thead><tr><th>#</th><th class="l">زمین</th><th>سهم</th><th>مساحت (م²)</th><th>ارزش (تومان)</th><th class="l">توضیح</th></tr></thead><tbody>';
+        x.finalLines.forEach((l, i) => { h += '<tr><td>' + App.n(i + 1, 0) + '</td><td class="l">' + E(l.name) + '</td><td>' + E(fa(l.fractionText)) + '</td><td>' + App.n(l.area, 1) + '</td><td>' + T(l.valueExact) + '</td><td class="l">' + E(l.note) + '</td></tr>'; });
+        h += '</tbody></table>'; } else h += '<div class="note">زمینی ندارد.</div>';
+      if (x.dealLines.length) h += '<div class="note">معامله‌ها: ' + E(x.dealLines.join(' | ')) + '</div>';
+      h += '</div>';
+    });
+    if (ev.settlement.length) h += '<h2>تسویه</h2><ul>' + ev.settlement.map(s => '<li>' + E(s.fromName) + ' ← پرداخت ' + T(s.amountExact) + ' تومان به ' + E(s.toName) + '</li>').join('') + '</ul>';
+    return h;
   }
+  function printResult(sc, ev) { App.printHtml(sheetHtml(sc, ev)); }
+  function saveSheet(sc, ev) { App.download((sc.name || 'پرونده') + '.html', App.sheetDoc(sc.name, sheetHtml(sc, ev)), 'text/html'); }
   function exportXlsx(sc, ev) {
     if (!window.XLSX) { App.toast('کتابخانه‌ی اکسل بارگذاری نشده', 'err'); return; }
     const wb = XLSX.utils.book_new();

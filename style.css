@@ -183,9 +183,3 @@ table.t td .sub{display:block;color:var(--mut);font-size:11px;margin-top:2px}
   .modal{max-height:94vh}
 }
 
-@media print{
-  body.printing>*:not(#print-area){display:none!important}
-  body.printing #print-area{display:block!important}
-  #print-area{padding:10px;font-size:12px}
-}
-#print-area{display:none}

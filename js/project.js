@@ -13,6 +13,7 @@
       el('div', { class: 'row' }, [
         el('button', { class: 'btn', text: '💾 ذخیره‌ی فایل پروژه (JSON)', onclick: () => App.download('zamin-yar-project-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(App.S, null, 1)) }),
         el('label', { class: 'btn sec2', style: 'cursor:pointer' }, ['📂 بازکردن فایل پروژه', el('input', { type: 'file', accept: '.json', style: 'display:none', onchange: (e) => open(e.target.files[0]) })]),
+        window.ZY_SEED ? el('button', { class: 'btn sec2', id: 'seed-load', text: '📋 بارگذاری فهرست پیش‌فرض زمین‌ها و ارزش‌ها', onclick: () => App.confirm('بارگذاری فهرست پیش‌فرض', 'همه‌ی اطلاعات فعلی با فهرست آماده‌ی ' + App.n(window.ZY_SEED.parcels.length, 0) + ' زمین (با ارزش‌ها، اشخاص و تقسیم آماده) جایگزین شود؟ اگر کار مهمی دارید ابتدا «ذخیره‌ی فایل پروژه» را بزنید.', () => App.setState(App.normalize(App.seedState())), 'جایگزین شود') }) : null,
         el('button', { class: 'btn dng', text: 'پاک‌کردن همه‌چیز', onclick: () => App.confirm('پاک‌کردن پروژه', 'همه‌ی زمین‌ها، اشخاص، سناریوها و تنظیمات پاک می‌شود. ابتدا فایل پشتیبان بگیرید. ادامه؟', () => { App.setState(C.newState()); App.form.newParcel(true); App.toast('پروژه‌ی تازه ساخته شد'); render(); }, 'پاک شود') }),
       ]),
       el('div', { class: 'note', text: App.storageOk ? 'ذخیره‌ی خودکار در مرورگر: فعال' : '⚠️ ذخیره‌ی خودکار در این مرورگر ممکن نیست؛ حتماً فایل پروژه بگیرید.' }),

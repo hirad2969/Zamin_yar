@@ -11,7 +11,7 @@ const wait = (ms) => new Promise(r => setTimeout(r, ms));
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] });
   const dev = devices['Pixel 7'];
   const ctx = await browser.newContext({ ...dev, locale: 'fa-IR', geolocation: { latitude: 35, longitude: 51, accuracy: 5 }, permissions: ['geolocation'] });
-  const page = await ctx.newPage();
+  const page = await ctx.newPage(); await page.addInitScript(() => { window.ZY_NOSEED = true; });
   const errs = []; page.on('pageerror', e => errs.push(e.message)); page.on('dialog', d => d.accept());
   await page.route(/^https?:\/\/(?!localhost)/, r => r.abort());
   await page.goto(URL); await page.waitForSelector('#form-root .sec');
@@ -81,7 +81,7 @@ const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
   await T('ذخیره‌ی زمینِ اندازه‌گیری‌شده با GPS و بازیابی علت/منبع', async () => {
     await page.click('.choice:has-text("اطراف روستا")');
-    await page.selectOption('#form-root select >> nth=1', 'grade1');
+    await page.selectOption('#form-root select:not(#f-estate) >> nth=1', 'grade1');
     await page.click('text=ثبت زمین >> nth=-1');
     const p = await page.evaluate(() => App.S.parcels[0]);
     ok(p && p.geometry.source === 'gps' && p.geometry.meta.method === 'gps-auto' && p.valuation.total > 0, JSON.stringify(p && p.geometry && p.geometry.meta));
