@@ -207,6 +207,109 @@ t('نسخه‌ی وب: ذخیره‌ی خودکار در مرورگر و فای�
   ok(a.num && a.den, 'کسر دقیق در فایل پروژه ذخیره نشده است');
 });
 
+/* ---------- دسته‌های اموال، مبنای قیمت و برگه‌ی نهایی ---------- */
+t('دسته‌ها: ساخت دو دسته در رابط و ثبت سهم متفاوت (۴/۳) برای یک شخص', () => {
+  w.eval('App.tab("people")');
+  const S = w.App.S;
+  const add = () => {
+    const card = Array.from(doc.querySelectorAll('#people-root .card')).find(c => /دسته‌های اموال/.test(c.textContent));
+    ok(card, 'کارت دسته‌های اموال پیدا نشد');
+    return card;
+  };
+  let card = add();
+  const inp = card.querySelector('input[type=text]');
+  const btn = Array.from(card.querySelectorAll('.btn')).find(b => /افزودن دسته/.test(b.textContent));
+  inp.value = 'اموال پدری'; btn.dispatchEvent(new w.Event('click'));
+  card = add();
+  const inp2 = card.querySelector('input[type=text]');
+  const btn2 = Array.from(card.querySelectorAll('.btn')).find(b => /افزودن دسته/.test(b.textContent));
+  inp2.value = 'اموال دره‌گرمی'; btn2.dispatchEvent(new w.Event('click'));
+  ok(S.estates.length === 2, 'دو دسته ساخته نشد: ' + S.estates.length);
+  has(doc.getElementById('people-root').textContent, 'سهم هر شخص در هر دسته', 'ماتریس سهم‌ها نمایش داده نشد');
+  // سهم نفر اول در دسته‌ی دوم: ۴/۳ (یک‌سوم بیشتر)
+  const mx = Array.from(doc.querySelectorAll('#people-root table.mx tbody tr'))[0];
+  const cells = mx.querySelectorAll('input[dir=ltr]');
+  ok(cells.length === 2, 'برای هر دسته یک خانه لازم است: ' + cells.length);
+  cells[1].value = '4/3'; cells[1].dispatchEvent(new w.Event('change'));
+  const e2 = w.App.S.estates[1];
+  ok(C.fText(C.estateWeightFrac(e2, w.App.S.persons[0].id)) === '4/3', 'سهم ۴/۳ ثبت نشد');
+  // بقیه ۱ ⇒ جمع = ۴/۳ + ۱ + ۱ = ۱۰/۳
+  ok(C.fText(C.estateWeights(w.App.S, e2.id).sum) === '10/3', 'جمع سهم‌های دسته درست نیست');
+});
+t('دسته‌ها: دکمه‌ی «سهم مضاعف» ⇒ یک‌سوم بیشتر برای نفرهای انتخاب‌شده', () => {
+  const S = w.App.S;
+  const btn = Array.from(doc.querySelectorAll('#people-root .btn')).filter(b => /سهم مضاعف/.test(b.textContent))[1];
+  ok(btn, 'دکمه‌ی سهم مضاعف پیدا نشد');
+  btn.dispatchEvent(new w.Event('click'));
+  const cbs = Array.from(doc.querySelectorAll('#modal-root input[type=checkbox]'));
+  ok(cbs.length === S.persons.length, 'فهرست اشخاص در پنجره نیست');
+  cbs[0].checked = true; cbs[0].dispatchEvent(new w.Event('change'));
+  const apply = Array.from(doc.querySelectorAll('#modal-root .mf .btn')).find(b => /اعمال/.test(b.textContent));
+  apply.dispatchEvent(new w.Event('click'));
+  const e2 = w.App.S.estates[1];
+  const ws = w.App.S.persons.map(p => C.fText(C.estateWeightFrac(e2, p.id)));
+  ok(ws[0] === '5/3' || ws[0] === '4/3', 'سهم نفر اول بیشتر نشد: ' + ws.join(','));
+  ok(ws.slice(1).every(x => x === '1'), 'سهم بقیه نباید تغییر کند: ' + ws.join(','));
+});
+t('دسته‌ها: دو منبع با هم ⇒ حق هرکس جمع سهمش در دو دسته و بستانکاری/بدهکاری ترازند', () => {
+  const S = w.App.S;
+  const ids = Object.keys(S.parcels.reduce((o, p) => (o[p.id] = 1, o), {}));
+  ok(S.parcels.length >= 2 && S.estates.length === 2, 'پیش‌نیاز آماده نیست');
+  C.setParcelEstate(S, S.parcels[0].id, S.estates[0].id, true);
+  S.parcels.slice(1).forEach(p => C.setParcelEstate(S, p.id, S.estates[1].id, true));
+  const sc = C.createScenario(S, 'دو منبع با هم');
+  Object.keys(sc.parcels).forEach(pid => C.setEqualAllocation(sc, pid, S.persons.map(p => p.id)));
+  w.eval('App.save()'); w.App.emit('state');
+  const openBtn = Array.from(doc.querySelectorAll('#people-root table.t tbody tr')).filter(tr => /دو منبع با هم/.test(tr.textContent)).map(tr => Array.from(tr.querySelectorAll('.btn')).find(b => /باز کردن/.test(b.textContent)))[0];
+  ok(openBtn, 'دکمه‌ی بازکردن سناریوی تازه پیدا نشد');
+  openBtn.dispatchEvent(new w.Event('click'));
+  const body = doc.getElementById('people-root').textContent;
+  has(body, 'سطح قیمت‌های مرجع', 'نوار مبنای قیمت دیده نشد');
+  has(body, 'دسته‌های اموال در این محاسبه', 'انتخاب دسته‌ها دیده نشد');
+  has(body, 'بستانکار');
+  const ev = C.evaluateScenario(S, sc);
+  ok(ev.estates.length === 2, 'دو دسته در محاسبه نیست: ' + ev.estates.length);
+  const sumC = ev.results.reduce((s, r) => s + r.credit, 0), sumD = ev.results.reduce((s, r) => s + r.debit, 0);
+  ok(sumC === sumD, 'جمع بستانکاری و بدهکاری برابر نیست: ' + sumC + ' / ' + sumD);
+  ok(ev.results.reduce((s, r) => s + r.entitled, 0) === ev.pool, 'جمع حق‌ها با ارزش کل برابر نیست');
+  ok(ids.length >= 2);
+});
+t('مبنای قیمت: تغییر منبع و ضریب در رابط ⇒ ارزش کل و حق اشخاص بلافاصله دوباره حساب می‌شود', () => {
+  const S = w.App.S, sc = S.scenarios[S.scenarios.length - 1];
+  const before = C.evaluateScenario(S, sc).pool;
+  const sels = Array.from(doc.querySelectorAll('#people-root .basis select'));
+  ok(sels.length >= 3, 'انتخابگرهای مبنای قیمت پیدا نشد: ' + sels.length);
+  sels[0].value = 'live'; sels[0].dispatchEvent(new w.Event('change'));
+  ok(C.normBasis(w.App.S.scenarios[w.App.S.scenarios.length - 1].priceBasis).mode === 'live', 'منبع قیمت عوض نشد');
+  const fac = doc.querySelector('#people-root .basis input[dir=ltr]');
+  ok(fac, 'کادر ضریب پیدا نشد');
+  fac.value = '2'; fac.dispatchEvent(new w.Event('change'));
+  const sc2 = w.App.S.scenarios[w.App.S.scenarios.length - 1];
+  const ev = C.evaluateScenario(w.App.S, sc2);
+  near(ev.pool, before * 2, Math.max(2, before * 0.0001), 'ارزش کل با ضریب ۲ دو برابر نشد');
+  ok(ev.results.every(r => r.entitled > 0), 'حق اشخاص محاسبه نشد');
+  has(doc.getElementById('people-root').textContent, 'ارزش کل با این مبنا', 'خلاصه‌ی مبنای قیمت دیده نشد');
+  // برگشت به عکس سناریو
+  const sels2 = Array.from(doc.querySelectorAll('#people-root .basis select'));
+  sels2[0].value = 'snapshot'; sels2[0].dispatchEvent(new w.Event('change'));
+  near(C.evaluateScenario(w.App.S, w.App.S.scenarios[w.App.S.scenarios.length - 1]).pool, before, 2, 'برگشت به قیمت‌های سناریو انجام نشد');
+});
+t('برگه‌ی نهایی: برای هر شخص فهرست زمین‌ها، جمع کل و بستانکاری/بدهکاری دارد', () => {
+  const btn = Array.from(doc.querySelectorAll('#people-root .btn')).find(b => /برگه‌ی نهایی تقسیم/.test(b.textContent));
+  ok(btn, 'دکمه‌ی برگه‌ی نهایی پیدا نشد');
+  btn.dispatchEvent(new w.Event('click'));
+  const sheet = doc.querySelector('#modal-root .sheet');
+  ok(sheet, 'برگه ساخته نشد');
+  const txt = sheet.textContent;
+  has(txt, 'برگه‌ی نهایی تقسیم');
+  has(txt, 'هر زمین به چه کسی رسید');
+  has(txt, 'خلاصه‌ی تسویه');
+  ok(sheet.querySelectorAll('.person').length === w.App.S.persons.length, 'برای هر شخص یک برگه لازم است');
+  ok(doc.getElementById('print-root'), 'جای چاپ در صفحه نیست');
+  const html = w.App.sheetDoc('آزمون', sheet.innerHTML);
+  ok(/^<!doctype html>/i.test(html) && /dir="rtl"/.test(html), 'سند چاپی کامل نیست');
+});
+
 t('پرونده‌ی زنده: ساخت، بخش‌ها، واگذاری، معامله، کسری و تغییر قیمت در رابط', () => {
   const S = w.App.S;
   S.parcels.length = 0;
@@ -253,6 +356,7 @@ t('پرونده‌ی زنده: ساخت، بخش‌ها، واگذاری، مع�
   ok(!/\[object/.test(root.textContent), 'متن نامعتبر در صفحه');
   ok(w.App.cases.textOf(sc, ev).indexOf('علی') >= 0, 'متن خروجی');
 });
+
 
 console.log(out.join('\n'));
 console.log(`\nموفق: ${pass}  ناموفق: ${fail}`);

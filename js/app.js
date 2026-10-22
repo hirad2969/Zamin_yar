@@ -9,10 +9,18 @@
   App.on = (e, f) => { (App.ev[e] = App.ev[e] || []).push(f); };
   App.emit = (e, a) => { (App.ev[e] || []).forEach(f => { try { f(a); } catch (x) { console.error(e, x); } }); };
 
+  /** سازگاری با پروژه‌های قدیمی‌تر: کلیدهای تازه‌ی وضعیت را می‌سازد (بدون دست‌زدن به داده‌ها) */
+  App.normalize = function (s) {
+    if (!s) return s;
+    if (!Array.isArray(s.estates)) s.estates = [];
+    if (!Array.isArray(s.persons)) s.persons = [];
+    (s.scenarios || []).forEach(sc => { if (sc && !sc.priceBasis) sc.priceBasis = { mode: 'snapshot', level: 'base', version: sc.settingsVersion, factor: 1, ignoreOverride: false }; });
+    return s;
+  };
   App.load = function () {
     try {
       const t = localStorage.getItem(KEY);
-      if (t) { const s = JSON.parse(t); if (s && s.schema === 1 && s.settings && Array.isArray(s.parcels)) return s; }
+      if (t) { const s = JSON.parse(t); if (s && s.schema === 1 && s.settings && Array.isArray(s.parcels)) return App.normalize(s); }
     } catch (e) { App.storageOk = false; }
     return C.newState();
   };
@@ -24,7 +32,7 @@
     }
     const c = document.getElementById('cnt-parcels'); if (c) c.textContent = App.n(App.S.parcels.length);
   };
-  App.setState = function (s) { App.S = s; App.save(); App.emit('state'); };
+  App.setState = function (s) { App.S = App.normalize(s); App.save(); App.emit('state'); };
 
   /* ---------- نمایش اعداد ---------- */
   App.n = (x, d) => (x == null || !isFinite(x)) ? '—' : Number(x).toLocaleString('fa-IR', { maximumFractionDigits: d == null ? 2 : d });
@@ -101,6 +109,36 @@
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
     document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
   };
+  /* ---------- برگه‌ی چاپی (برگه‌ی نهایی تقسیم) ---------- */
+  /** یک سند HTML کامل و مستقل (راست‌چین، قابل چاپ و ذخیره) از محتوای برگه می‌سازد */
+  App.sheetDoc = function (title, innerHtml) {
+    return '<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">'
+      + '<meta name="viewport" content="width=device-width, initial-scale=1">'
+      + '<title>' + App.esc(title) + '</title><style>'
+      + 'body{font-family:Tahoma,"Segoe UI",system-ui,sans-serif;color:#23301f;margin:16px;font-size:13px;line-height:1.8}'
+      + 'h1{font-size:18px;margin:0 0 4px}h2{font-size:15px;margin:16px 0 6px}h3{font-size:14px;margin:10px 0 4px}'
+      + 'table{width:100%;border-collapse:collapse;margin:6px 0}th,td{border:1px solid #bbb;padding:4px 6px;text-align:center}'
+      + 'th{background:#eef0e6}td.l,th.l{text-align:right}tfoot th{background:#f6f6f0}'
+      + '.note{color:#6b7566;font-size:11px}.pos{color:#1c7a3e}.neg{color:#b3261e}'
+      + '.person{border:1px solid #bbb;border-radius:8px;padding:8px;margin:10px 0;page-break-inside:avoid}'
+      + '.sign{margin-top:10px;display:flex;gap:24px;font-size:12px;color:#444}'
+      + '@page{size:A4;margin:12mm}</style></head><body>' + innerHtml + '</body></html>';
+  };
+  /** چاپ یک برگه بدون بازکردن پنجره‌ی تازه (در وب و اندروید یکسان کار می‌کند) */
+  App.printHtml = function (html) {
+    const root = document.getElementById('print-root');
+    if (!root) { App.toast('بخش چاپ آماده نیست؛ از «ذخیره‌ی برگه» استفاده کنید.', 'warn'); return false; }
+    root.innerHTML = html;
+    document.body.classList.add('printing');
+    const done = () => { document.body.classList.remove('printing'); root.innerHTML = ''; window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    setTimeout(() => {
+      try { window.print(); } catch (e) { App.toast('چاپ در این دستگاه ممکن نیست؛ «ذخیره‌ی برگه (HTML)» را بزنید.', 'warn'); }
+      setTimeout(done, 2000);
+    }, 50);
+    return true;
+  };
+
   /* دانلود فایل متنی */
   App.download = function (name, text, type) {
     const blob = new Blob([text], { type: type || 'application/json' });

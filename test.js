@@ -751,6 +751,170 @@ t('زمین حذف‌شده از برنامه: پرونده خطا می‌دهد
   ok(ev.errors.some(e => /حذف شده/.test(e)) && ev.pool === 10880000000);
 });
 
+/* -------- دسته‌های اموال (چند منبع با سهم متفاوت) و مبنای قیمت -------- */
+/** وضعیت نمونه: ۷ پسر، «اموال پدری» (سهم برابر) و «اموال دره‌گرمی» (دو پسر یک‌سوم بیشتر) */
+function estateFixture() {
+  const st = C.newState();
+  const pedari = C.addEstate(st, 'اموال پدری');
+  const dare = C.addEstate(st, 'اموال دره‌گرمی');
+  const sons = []; for (let i = 0; i < 7; i++) sons.push(C.addPerson(st, 'پسر ' + (i + 1), 1));
+  C.setEstateEqualWeights(st, pedari.id, sons.map(x => x.id));
+  sons.forEach((x, i) => C.setEstateWeight(st, dare.id, x.id, i < 2 ? '4/3' : '1'));   // دو پسر شریک: ۴/۳
+  const A = mkParcel({ name: 'پدری', estateId: pedari.id, areaComputed: 70000 });      // 70000×120000 = 8.4e9
+  const B = mkParcel({ name: 'دره‌گرمی', estateId: dare.id, areaComputed: 23000 });     // 23000×120000 = 2.76e9
+  [A, B].forEach(x => C.addParcel(st, x));
+  return { st, pedari, dare, sons, A, B };
+}
+
+t('دسته‌ها: دو منبع با سهم متفاوت ⇒ حق هرکس جمع سهمش در هر دو دسته است', () => {
+  const { st, sons, A, B } = estateFixture();
+  const sc = C.createScenario(st, 'هر دو منبع');
+  C.setEqualAllocation(sc, A.id, sons.map(x => x.id));
+  C.setAllocation(sc, B.id, sons[0].id, 1);
+  const ev = C.evaluateScenario(st, sc);
+  eq(ev.pool, 8400000000 + 2760000000);
+  eq(ev.estates.length, 2);
+  // اموال پدری: هرکس ۱/۷ از ۸٫۴ میلیارد = ۱٫۲ میلیارد
+  // دره‌گرمی: دو پسر ۴/۲۳ و بقیه ۳/۲۳ از ۲٫۷۶ میلیارد = ۴۸۰ و ۳۶۰ میلیون
+  const r0 = ev.results[0], r2 = ev.results[2];
+  eq(r0.entitled, 1200000000 + 480000000);
+  eq(r2.entitled, 1200000000 + 360000000);
+  eq(r0.byEstate.length, 2);
+  eq(r0.byEstate[1].shareText, '4/23'); eq(r2.byEstate[1].shareText, '3/23');
+  eq(ev.results.reduce((s, r) => s + r.entitled, 0), ev.pool);
+  ok(ev.checks.every(k => k.ok), ev.checks.filter(k => !k.ok).map(k => k.msg).join(' | '));
+});
+t('دسته‌ها: بستانکاری و بدهکاری ⇒ جمع دو طرف برابر است', () => {
+  const { st, sons, A, B } = estateFixture();
+  const sc = C.createScenario(st, 'تسویه');
+  C.setEqualAllocation(sc, A.id, sons.map(x => x.id));
+  C.setAllocation(sc, B.id, sons[0].id, 1);                   // کل دره‌گرمی به پسر ۱
+  const ev = C.evaluateScenario(st, sc);
+  const r0 = ev.results[0];
+  eq(r0.settle, 'بدهکار'); eq(r0.debit, 2760000000 - 480000000); eq(r0.credit, 0);
+  eq(ev.results[1].settle, 'بستانکار'); eq(ev.results[1].credit, 480000000);
+  eq(ev.results.reduce((s, r) => s + r.credit, 0), ev.results.reduce((s, r) => s + r.debit, 0));
+});
+t('دسته‌ها: محاسبه‌ی فقط یک دسته (بقیه کنار گذاشته می‌شوند)', () => {
+  const { st, pedari, sons, A } = estateFixture();
+  const sc = C.createScenario(st, 'فقط پدری');
+  C.setEqualAllocation(sc, A.id, sons.map(x => x.id));
+  sc.estates = [pedari.id];
+  const ev = C.evaluateScenario(st, sc);
+  eq(ev.pool, 8400000000);
+  eq(ev.skipped.length, 1);
+  ev.results.forEach(r => { eq(r.entitled, 1200000000); eq(r.diff, 0); });
+  ok(ev.checks.every(k => k.ok), ev.checks.filter(k => !k.ok).map(k => k.msg).join(' | '));
+});
+t('دسته‌ها: دسته‌ی بدون سهم ⇒ خطا و کنترل قرمز، و حذف دسته زمین‌ها را پاک نمی‌کند', () => {
+  const st = C.newState();
+  const e = C.addEstate(st, 'سهم‌نخورده');
+  C.addPerson(st, 'الف', 1);
+  const p = mkParcel({ estateId: e.id }); C.addParcel(st, p);
+  e.weights = { nobody: { num: '0', den: '1' } };              // وزن صفر ⇒ عملاً بدون سهم
+  const sc = C.createScenario(st, 'بدون سهم');
+  const ev = C.evaluateScenario(st, sc);
+  ok(ev.estates[0].usedDefaultWeights, 'باید به سهم پیش‌فرض برگردد');
+  // حالا شخص را برداریم تا هیچ وزنی نماند
+  st.persons = [];
+  const ev2 = C.evaluateScenario(st, sc);
+  ok(!ev2.checks.find(k => k.id === 'estate_weights').ok, 'کنترل دسته باید رد شود');
+  C.removeEstate(st, e.id);
+  eq(st.parcels.length, 1); eq(st.parcels[0].estateId, null);
+});
+t('مبنای قیمت: قیمت‌های فعلی، سطح حداقل/حداکثر و ضریب ⇒ همه‌ی محاسبه‌ها دوباره انجام می‌شود', () => {
+  const st = C.newState();
+  const s2 = C.clone(st.settings);
+  s2.groups.rural_outside.cells.grade1_normal = { fixed: 120000, min: 100000, max: 200000 };
+  C.updateSettings(st, s2, 'keep', null, 'بازه‌ی قیمت');
+  const p = mkParcel({ areaComputed: 1000 }); C.addParcel(st, p);           // 1000 × 120000 = 1.2e8
+  const a = C.addPerson(st, 'الف', 1), b = C.addPerson(st, 'ب', 1);
+  const sc = C.createScenario(st, 'مبنا');
+  C.setEqualAllocation(sc, p.id, [a.id, b.id]);
+  eq(C.evaluateScenario(st, sc).pool, 120000000);                           // عکس سناریو
+  C.setScenarioBasis(sc, { mode: 'live', level: 'min' });
+  eq(C.evaluateScenario(st, sc).pool, 100000000);                           // حداقل بازه
+  eq(C.evaluateScenario(st, sc).results[0].entitled, 50000000);
+  C.setScenarioBasis(sc, { level: 'max' });
+  eq(C.evaluateScenario(st, sc).pool, 200000000);                           // حداکثر بازه
+  C.setScenarioBasis(sc, { level: 'base', factor: 1.5 });
+  eq(C.evaluateScenario(st, sc).pool, 180000000);                           // ۱٫۵ برابر
+  C.setScenarioBasis(sc, { mode: 'snapshot' });
+  eq(C.evaluateScenario(st, sc).pool, 120000000);                           // برگشت به عکس سناریو
+});
+t('مبنای قیمت: قیمت دستی زمین با گزینه‌ی «نادیده‌گرفتن» کنار می‌رود', () => {
+  const st = C.newState();
+  const p = mkParcel({ areaComputed: 1000 });
+  p.pricing.override = 500000;                                              // قیمت دستی
+  C.addParcel(st, p);
+  C.addPerson(st, 'الف', 1);
+  const sc = C.createScenario(st, 'دستی');
+  eq(C.evaluateScenario(st, sc).pool, 500000000);
+  C.setScenarioBasis(sc, { mode: 'live' });
+  eq(C.evaluateScenario(st, sc).pool, 500000000);                           // قیمت دستی برنده است
+  C.setScenarioBasis(sc, { ignoreOverride: true });
+  eq(C.evaluateScenario(st, sc).pool, 120000000);                           // قیمت جدول
+});
+t('مبنای قیمت: انتخاب نسخه‌ی قدیمی تنظیمات ⇒ نرخ همان نسخه', () => {
+  const st = C.newState();
+  const p = mkParcel({ areaComputed: 1000 }); C.addParcel(st, p);           // نسخه‌ی ۱: 120000
+  const s2 = C.clone(st.settings); s2.groups.rural_outside.cells.grade1_normal.fixed = 300000;
+  C.updateSettings(st, s2, 'keep', null, 'گران‌تر');                        // نسخه‌ی ۲
+  C.addPerson(st, 'الف', 1);
+  const sc = C.createScenario(st, 'نسخه‌ها');
+  C.setScenarioBasis(sc, { mode: 'live' });
+  eq(C.evaluateScenario(st, sc).pool, 300000000);
+  C.setScenarioBasis(sc, { mode: 'version', version: 1 });
+  eq(C.evaluateScenario(st, sc).pool, 120000000);
+  ok(/نسخه/.test(C.basisText(st, sc.priceBasis)));
+});
+t('برگه‌ی نهایی: فهرست زمین‌های هر نفر، جمع کل و بستانکاری/بدهکاری', () => {
+  const { st, sons, A, B } = estateFixture();
+  const sc = C.createScenario(st, 'برگه');
+  C.setEqualAllocation(sc, A.id, sons.map(x => x.id));
+  C.setAllocation(sc, B.id, sons[0].id, 1);
+  const sh = C.buildDivisionSheets(st, sc);
+  eq(sh.persons.length, 7); eq(sh.lands.length, 2);
+  const p0 = sh.persons[0];
+  eq(p0.lands.length, 2);                                                   // از هر دو دسته سهم دارد
+  eq(p0.lands[0].estateName, 'اموال پدری'); eq(p0.lands[1].estateName, 'اموال دره‌گرمی');
+  eq(p0.totals.value, 1200000000 + 2760000000);
+  eq(p0.settle, 'بدهکار'); eq(p0.debit, p0.received - p0.entitled);
+  eq(sh.totals.credit, sh.totals.debit);
+  eq(sh.totals.value, sh.pool);
+  // فهرست نهایی: هر زمین به چه کسی رسید
+  const landB = sh.lands.find(l => l.name === 'دره‌گرمی');
+  eq(landB.parts.length, 1); eq(landB.parts[0].person, 'پسر 1'); eq(landB.parts[0].sharePct, '100');
+  eq(sh.lands.find(l => l.name === 'پدری').parts.length, 7);
+  ok(sh.basisText.length > 0);
+});
+t('گردکردن نمایشی: جمع حق‌ها = ارزش کل و جمع بستانکاری = جمع بدهکاری (بدون اختلاف یک‌تومانی)', () => {
+  const st = C.newState();
+  const p = mkParcel({ areaComputed: 1000 }); C.addParcel(st, p);           // 1.2e8 ÷ ۷ عدد رُند نمی‌شود
+  const ids = []; for (let i = 0; i < 7; i++) ids.push(C.addPerson(st, 'ن' + i, 1).id);
+  const sc = C.createScenario(st, 'گردکردن');
+  C.setAllocation(sc, p.id, ids[0], 1);                                      // همه‌ی زمین به نفر اول
+  const ev = C.evaluateScenario(st, sc);
+  eq(ev.results.reduce((s, r) => s + r.entitled, 0), ev.pool);
+  eq(ev.results.reduce((s, r) => s + r.received, 0), ev.pool);
+  eq(ev.results.reduce((s, r) => s + r.credit, 0), ev.results.reduce((s, r) => s + r.debit, 0));
+  eq(ev.results.reduce((s, r) => s + r.diff, 0), 0);
+  ok(ev.checks.every(k => k.ok), ev.checks.filter(k => !k.ok).map(k => k.msg).join(' | '));
+});
+t('سازگاری: پروژه‌ی بدون دسته‌ی اموال دقیقاً مثل قبل محاسبه می‌شود', () => {
+  const st = C.newState();
+  const p = mkParcel({ areaComputed: 1000 }); C.addParcel(st, p);
+  const a = C.addPerson(st, 'الف', '3/2'), b = C.addPerson(st, 'ب', 1);
+  const sc = C.createScenario(st, 'بدون دسته');
+  delete sc.priceBasis; delete sc.estates;                                   // شکل فایل نسخه‌ی قبل
+  C.setEqualAllocation(sc, p.id, [a.id, b.id]);
+  const ev = C.evaluateScenario(st, sc);
+  eq(ev.pool, 120000000);
+  eq(ev.results[0].entitledFracText, '3/5'); eq(ev.results[1].entitledFracText, '2/5');
+  eq(ev.estates.length, 1); eq(ev.estates[0].name, C.NO_ESTATE_NAME);
+  ok(ev.checks.every(k => k.ok), ev.checks.filter(k => !k.ok).map(k => k.msg).join(' | '));
+});
+
 (async () => {
   // KMZ (async)
   try {

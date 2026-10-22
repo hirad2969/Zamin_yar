@@ -10,6 +10,8 @@ on:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write        # برای انتشار APK در «آخرین نسخه‌ی اندروید» (Releases)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,3 +32,32 @@ jobs:
         run: cd android && chmod +x gradlew && ./gradlew assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with: { name: zamin-yar-apk, path: android/app/build/outputs/apk/debug/app-debug.apk }
+
+      # لینک همیشگی دانلود اندروید (بدون نیاز به ورود به GitHub):
+      # https://github.com/hirad2969/Zamin_yar/releases/latest/download/zamin-yar.apk
+      - name: انتشار APK در «آخرین نسخه‌ی اندروید»
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: android-latest
+        run: |
+          set -e
+          cp android/app/build/outputs/apk/debug/app-debug.apk zamin-yar.apk
+          SIZE=$(du -h zamin-yar.apk | cut -f1)
+          NOTES=$(printf '%s\n' \
+            'نسخه‌ی اندروید زمین‌یار هوشمند (APK آزمایشی، امضای debug).' \
+            '' \
+            "ساخته‌شده از: \`$GITHUB_SHA\` — شاخه‌ی \`${GITHUB_REF_NAME}\` — اجرای #${GITHUB_RUN_NUMBER} — حجم ${SIZE}" \
+            '' \
+            'نصب: فایل `zamin-yar.apk` را روی گوشی دانلود کنید و اجازه‌ی «نصب از منبع ناشناس» را بدهید.' \
+            'این فایل با هر به‌روزرسانی شاخه‌ی main دوباره ساخته می‌شود و همین نشانی همیشه آخرین نسخه را می‌دهد:' \
+            'https://github.com/hirad2969/Zamin_yar/releases/latest/download/zamin-yar.apk' \
+            '' \
+            'نسخه‌ی وب (بدون نصب): https://hirad2969.github.io/Zamin_yar/')
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" zamin-yar.apk --clobber
+            gh release edit "$TAG" --title 'زمین‌یار هوشمند — آخرین نسخه‌ی اندروید' --notes "$NOTES" --latest
+          else
+            gh release create "$TAG" zamin-yar.apk --target "$GITHUB_SHA" \
+              --title 'زمین‌یار هوشمند — آخرین نسخه‌ی اندروید' --notes "$NOTES" --latest
+          fi
