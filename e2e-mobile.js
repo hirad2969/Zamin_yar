@@ -11,7 +11,7 @@ const wait = (ms) => new Promise(r => setTimeout(r, ms));
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] });
   const dev = devices['Pixel 7'];
   const ctx = await browser.newContext({ ...dev, locale: 'fa-IR', geolocation: { latitude: 35, longitude: 51, accuracy: 5 }, permissions: ['geolocation'] });
-  const page = await ctx.newPage(); await page.addInitScript(() => { window.ZY_NOSEED = true; });
+  const page = await ctx.newPage(); await page.addInitScript(() => { window.ZY_NOSEED = true; try { localStorage.setItem('zy-adv', '1'); } catch (e) {} });
   const errs = []; page.on('pageerror', e => errs.push(e.message)); page.on('dialog', d => d.accept());
   await page.route(/^https?:\/\/(?!localhost)/, r => r.abort());
   await page.goto(URL); await page.waitForSelector('#form-root .sec');

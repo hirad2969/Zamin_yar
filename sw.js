@@ -1,5 +1,5 @@
 /* سرویس‌ورکر: برنامه بدون اینترنت باز می‌شود؛ کاشی‌های نقشه‌ی دیده‌شده هم ذخیره می‌شوند */
-const VER = 'zy-v6';
+const VER = 'zy-v7';
 const SHELL = ['./', 'index.html', 'style.css', 'core.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
   'vendor/leaflet.js', 'vendor/leaflet.css', 'vendor/proj4.js', 'vendor/xlsx.full.min.js', 'vendor/jszip.min.js',
   'vendor/images/marker-icon.png', 'vendor/images/marker-icon-2x.png', 'vendor/images/marker-shadow.png', 'vendor/images/layers.png', 'vendor/images/layers-2x.png',

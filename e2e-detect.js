@@ -15,7 +15,7 @@ const center = [lat0 + dLat / 2, lon0 + dLon / 2];
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] });
   const ctx = await browser.newContext({ ...devices['Pixel 7'], locale: 'fa-IR', serviceWorkers: 'block' });
   const helper = await ctx.newPage(); await helper.goto('about:blank');
-  const page = await ctx.newPage(); await page.addInitScript(() => { window.ZY_NOSEED = true; });
+  const page = await ctx.newPage(); await page.addInitScript(() => { window.ZY_NOSEED = true; try { localStorage.setItem('zy-adv', '1'); } catch (e) {} });
   const errs = []; page.on('pageerror', e => errs.push(e.message)); page.on('dialog', d => d.accept());
   let tilesMode = 'ok', tileReqs = 0, withNeighbor = false;
   await page.route(/^https?:\/\/(?!localhost)/, async (r) => {

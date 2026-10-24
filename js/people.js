@@ -22,6 +22,12 @@
 
   function render() {
     const S = App.S, r = root(); r.innerHTML = '';
+    if (App.cases && !App.cases.advOn()) {                     // حالت ساده (پیش‌فرض)
+      App.cases.simple(r, render);
+      r.appendChild(el('div', { style: 'margin:14px 0;text-align:center' }, el('button', { class: 'btn sm sec2', id: 'adv-on', text: '⚙ ابزارهای پیشرفته (اشخاص، دسته‌ها، سناریوهای قدیمی)', onclick: () => { App.cases.setAdv(true); render(); } })));
+      return;
+    }
+    r.appendChild(el('div', { style: 'margin:6px 0' }, el('button', { class: 'btn sm sec2', id: 'adv-off', text: '← بازگشت به صفحه‌ی ساده', onclick: () => { App.cases.setAdv(false); render(); } })));
     r.appendChild(el('h2', { text: 'اشخاص و تقسیم زمین‌ها' }));
     r.appendChild(el('div', { class: 'box info', html: 'محاسبه‌ها در خود برنامه انجام می‌شود، نه در اینترنت یا هوش مصنوعی: مساحت، ارزش هر زمین، جمع کل، سهم هر نفر، دریافتی، بستانکاری و بدهکاری — همه با <b>کسر دقیق</b> (مثل ۱/۸) حساب می‌شوند و گردکردن فقط در نمایش است. می‌توانید <b>چند دسته‌ی اموال</b> (مثلاً «اموال پدری» و «اموال دره‌گرمی») با سهم‌های متفاوت تعریف کنید و هم جدا و هم با هم حساب کنید؛ حق هرکس جمعِ سهمش در همه‌ی دسته‌هاست.' }));
     r.appendChild(personsCard(S));

@@ -31,6 +31,7 @@ FILES.forEach(f => { try { w.eval(read(f)); } catch (e) { loadErrors.push('با�
 let started = null;
 try { w.eval('App.start()'); } catch (e) { started = e.message; }
 const C = w.LandCore;
+try { w.localStorage.setItem('zy-adv', '1'); } catch (e) { /* ignore */ }
 
 /* مربع ۱۰۰×۱۰۰ متر در UTM39 (نزدیک اصفهان) به مختصات جغرافیایی */
 const proj4 = require('proj4');
@@ -365,6 +366,46 @@ t('پرونده‌ی زنده: ساخت، بخش‌ها، واگذاری، مع�
   ok(w.App.cases.textOf(sc, ev).indexOf('علی') >= 0, 'متن خروجی');
 });
 
+
+
+t('صفحه‌ی ساده: جدول سهم، خانه‌ی شهر، انتخاب زمین با یک انتخاب، مانده‌ی زنده و کد ارسال/دریافت', () => {
+  const S = w.App.S;
+  w.localStorage.setItem('zy-adv', '0');
+  S.parcels.length = 0; S.persons.length = 0; S.scenarios.length = 0; S.estates = [];
+  const mk = (name, total, area, est) => { const id = 'SP' + S.parcels.length; S.parcels.push({ id, name, notes: '', estateId: est, scope: 'rural_inside', attrs: {}, grade: 'grade1', special: false, valuation: { area, pricePerM2: Math.round(total / area), total, status: 'قطعی' } }); return id; };
+  const E1 = C.addEstate(S, 'دره گرمی'), E2 = C.addEstate(S, 'پدری');
+  const a = mk('دره الف', 2100000000, 1000, E1.id), b = mk('پدری ب', 7000000000, 3000, E2.id);
+  const M = C.addPerson(S, 'مصطفی', 1), E = C.addPerson(S, 'اسفندیار', 1), A = C.addPerson(S, 'امیر', 1), H = C.addPerson(S, 'مهدی', 1);
+  [[8, 8, 1, 4], [1, 1, 1, 4]].forEach((ws, i) => [M, E, A, H].forEach((p, j) => C.setEstateWeight(S, i === 0 ? E1.id : E2.id, p.id, String(ws[j]))));
+  const sc = C.createCase(S, 'آزمون', null, null); C.sectionsFromEstates(S, sc);
+  sc.house = { amount: '3000000000', receivers: [M.id, E.id, A.id], payer: H.id };
+  w.App.save(); w.eval('App.tab("map")'); w.eval('App.tab("people")');
+  ok(doc.getElementById('sum-table'), 'جدول سهم‌ها نیست');
+  const txt0 = doc.getElementById('sum-table').textContent;
+  ok(/خانه‌ی شهر/.test(txt0) && /جمع کل/.test(txt0) && /۸٬۰۰۰٬۰۰۰٬۰۰۰|۳٬۰۰۰٬۰۰۰٬۰۰۰/.test(txt0), 'ردیف‌های جدول: ' + txt0.slice(0, 200));
+  let ev = C.evaluateScenario(S, sc);
+  near(ev.results.reduce((s2, r) => s2 + r.credit, 0), 9100000000, 2, 'جمع اعتبار = ارزش کل');
+  // انتخاب: «پدری ب» برای امیر
+  const rows = Array.from(doc.querySelectorAll('#pick-box select'));
+  const selB = rows[2]; selB.value = A.id; selB.dispatchEvent(new w.Event('change'));
+  ok(sc.allocations[b] && sc.allocations[b][0].personId === A.id, 'انتخاب ثبت نشد ' + rows.length + ' ' + JSON.stringify(sc.allocations) + ' ' + selB.value + ' ' + Array.from(selB.options).map(o => o.value).join(','));
+  const strip = doc.getElementById('strip-box').textContent;
+  ev = C.evaluateScenario(S, sc);
+  const rA = ev.results.find(r => r.person.id === A.id);
+  near(rA.remaining, rA.credit - 7000000000, 1, 'مانده‌ی امیر');
+  ok(strip.indexOf('امیر') >= 0, 'نوار مانده');
+  // کد ارسال: ساخت و اعمال روی «نسخه‌ی اصلی»
+  doc.querySelector('#code-box select').value = A.id;
+  doc.getElementById('code-make').dispatchEvent(new w.Event('click'));
+  const code = doc.querySelector('#code-box textarea').value;
+  ok(/^ZY1:/.test(code), 'کد ساخته نشد');
+  delete sc.allocations[b];                                // مادر هنوز چیزی از امیر ندارد
+  doc.getElementById('code-in').value = '  ' + code + '  ';
+  doc.getElementById('code-apply').dispatchEvent(new w.Event('click'));
+  ok(sc.allocations[b] && sc.allocations[b][0].personId === A.id, 'کد اعمال نشد');
+  ok(sc.received && sc.received[A.id] && sc.received[A.id].n === 1, 'ثبت دریافت');
+  w.localStorage.setItem('zy-adv', '1');
+});
 
 console.log(out.join('\n'));
 console.log(`\nموفق: ${pass}  ناموفق: ${fail}`);

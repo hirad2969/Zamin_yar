@@ -5,11 +5,9 @@
 "scope": "rural_inside",
 "grade": "grade1",
 "special": false,
-"area": 413.3,
+"area": 413.305872,
 "price": 750000,
 "total": 309979404,
-"residential": "denied",
-"agri": "irrigated",
 "coords": [
 [
 48.371901512146,
@@ -31,7 +29,9 @@
 48.371901512146,
 33.53541203399743
 ]
-]
+],
+"residential": "denied",
+"agri": "irrigated"
 },
 {
 "name": "باغ مصطفی روبروی خانه حمید",
@@ -39,11 +39,9 @@
 "scope": "rural_inside",
 "grade": "grade1",
 "special": false,
-"area": 500.4,
+"area": 500.4060425,
 "price": 800000,
 "total": 400324834,
-"residential": "denied",
-"agri": "irrigated",
 "coords": [
 [
 48.370689153671265,
@@ -65,7 +63,9 @@
 48.370689153671265,
 33.536252668400145
 ]
-]
+],
+"residential": "denied",
+"agri": "irrigated"
 },
 {
 "name": "چم — قسمت ۱",
@@ -73,11 +73,9 @@
 "scope": "rural_inside",
 "grade": "grade2",
 "special": false,
-"area": 627.9,
+"area": 627.864968,
 "price": 500000,
 "total": 313932484,
-"residential": "denied",
-"agri": "irrigated",
 "coords": [
 [
 48.36744636297226,
@@ -171,7 +169,9 @@
 48.36744636297226,
 33.53994375359998
 ]
-]
+],
+"residential": "denied",
+"agri": "irrigated"
 },
 {
 "name": "چم — قسمت ۲",
@@ -179,11 +179,9 @@
 "scope": "rural_inside",
 "grade": "grade2",
 "special": false,
-"area": 627.9,
+"area": 627.864968,
 "price": 500000,
 "total": 313932484,
-"residential": "denied",
-"agri": "irrigated",
 "coords": [
 [
 48.36750085034472,
@@ -245,7 +243,9 @@
 48.36750085034472,
 33.53992070749107
 ]
-]
+],
+"residential": "denied",
+"agri": "irrigated"
 },
 {
 "name": "دره گرمی ناوه — قسمت ۱",
@@ -253,11 +253,9 @@
 "scope": "rural_inside",
 "grade": "grade2",
 "special": false,
-"area": 649.1,
+"area": 649.086002,
 "price": 500000,
 "total": 324543001,
-"residential": "denied",
-"agri": "irrigated",
 "coords": [
 [
 48.36600043591886,
@@ -279,7 +277,9 @@
 48.36600043591886,
 33.54164737050716
 ]
-]
+],
+"residential": "denied",
+"agri": "irrigated"
 },
 {
 "name": "دره گرمی ناوه — قسمت ۲",
@@ -287,11 +287,9 @@
 "scope": "rural_inside",
 "grade": "grade2",
 "special": false,
-"area": 649.1,
+"area": 649.086002,
 "price": 500000,
 "total": 324543001,
-"residential": "denied",
-"agri": "irrigated",
 "coords": [
 [
 48.366161584854126,
@@ -309,7 +307,9 @@
 48.366161584854126,
 33.54213687238979
 ]
-]
+],
+"residential": "denied",
+"agri": "irrigated"
 },
 {
 "name": "ناوه مهدی",
@@ -317,11 +317,9 @@
 "scope": "rural_inside",
 "grade": "grade2",
 "special": false,
-"area": 1199.6,
+"area": 1199.566982,
 "price": 500000,
 "total": 599783491,
-"residential": "confirmed",
-"agri": "dry",
 "coords": [
 [
 48.36555540561677,
@@ -343,7 +341,9 @@
 48.36555540561677,
 33.54239620567584
 ]
-]
+],
+"residential": "confirmed",
+"agri": "dry"
 },
 {
 "name": "زمین بغل رحمت علی",
@@ -351,11 +351,9 @@
 "scope": "rural_inside",
 "grade": "grade1",
 "special": true,
-"area": 451.2,
+"area": 451.176204,
 "price": 1000000,
 "total": 451176204,
-"residential": "confirmed",
-"agri": "dry",
 "coords": [
 [
 48.36530327796936,
@@ -377,7 +375,9 @@
 48.36530327796936,
 33.54147067887091
 ]
-]
+],
+"residential": "confirmed",
+"agri": "dry"
 },
 {
 "name": "باغ بغل موسی خان",
@@ -385,11 +385,9 @@
 "scope": "rural_inside",
 "grade": "grade1",
 "special": true,
-"area": 498.5,
+"area": 498.500565,
 "price": 1000000,
 "total": 498500565,
-"residential": "confirmed",
-"agri": "irrigated",
 "coords": [
 [
 48.364364504814155,
@@ -415,7 +413,9 @@
 48.364364504814155,
 33.54089389628397
 ]
-]
+],
+"residential": "confirmed",
+"agri": "irrigated"
 },
 {
 "name": "پل خدا علی حسین",
@@ -423,11 +423,9 @@
 "scope": "rural_inside",
 "grade": "grade1",
 "special": true,
-"area": 2002.0,
+"area": 2002.017555,
 "price": 1000000,
 "total": 2002017555,
-"residential": "confirmed",
-"agri": "irrigated",
 "coords": [
 [
 48.36447179317475,
@@ -457,7 +455,9 @@
 48.36447179317475,
 33.5415422175281
 ]
-]
+],
+"residential": "confirmed",
+"agri": "irrigated"
 },
 {
 "name": "دره گرمی پل خدا",
@@ -465,11 +465,9 @@
 "scope": "rural_inside",
 "grade": "grade1",
 "special": true,
-"area": 800.0,
+"area": 800,
 "price": 1000000,
 "total": 800000000,
-"residential": "confirmed",
-"agri": "irrigated",
 "coords": [
 [
 48.36457371711732,
@@ -491,7 +489,9 @@
 48.36457371711732,
 33.541439380689766
 ]
-]
+],
+"residential": "confirmed",
+"agri": "irrigated"
 },
 {
 "name": "گردنه بردگلو",
@@ -499,10 +499,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": true,
-"area": 20741.6,
+"area": 20741.627393333332,
 "price": 150000,
 "total": 3111244109,
-"farmType": "dry",
 "coords": [
 [
 48.3643564581871,
@@ -664,7 +663,8 @@
 48.3643564581871,
 33.54993642066663
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "گردنه بردگلو 2",
@@ -672,10 +672,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": false,
-"area": 6376.0,
+"area": 6376.0144,
 "price": 120000,
 "total": 765121728,
-"farmType": "dry",
 "coords": [
 [
 48.36721569299698,
@@ -789,7 +788,8 @@
 48.36721569299698,
 33.547978218770986
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "دره گرمی زیرراه چنار حمام — قسمت ۱مهدی",
@@ -797,10 +797,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": true,
-"area": 12566.0,
+"area": 12566,
 "price": 150000,
 "total": 1884900000,
-"farmType": "dry",
 "coords": [
 [
 48.36440473794937,
@@ -894,7 +893,8 @@
 48.36440473794937,
 33.55244445582677
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "دره گرمی زیرراه چنار حمام — قسمت ۲عمو اسفندیار",
@@ -902,10 +902,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": true,
-"area": 5441.0,
+"area": 5441,
 "price": 150000,
 "total": 816150000,
-"farmType": "dry",
 "coords": [
 [
 48.36668288586571,
@@ -971,7 +970,8 @@
 48.36668288586571,
 33.55169965835243
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "دره گرمی مافی — قسمت ۱ عمواسفندیار",
@@ -979,10 +979,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": true,
-"area": 9456.0,
+"area": 9456,
 "price": 150000,
 "total": 1418400000,
-"farmType": "dry",
 "coords": [
 [
 48.36548030376434,
@@ -1036,7 +1035,8 @@
 48.36548030376434,
 33.559344551569104
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "دره گرمی مافی — قسمت ۲ امیر",
@@ -1044,10 +1044,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": true,
-"area": 17113.0,
+"area": 17113,
 "price": 150000,
 "total": 2566950000,
-"farmType": "dry",
 "coords": [
 [
 48.36685261763116,
@@ -1097,7 +1096,8 @@
 48.36685261763116,
 33.55910577232615
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "یازده بیری تیربرق",
@@ -1105,10 +1105,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": true,
-"area": 9653.1,
+"area": 9653.111213333334,
 "price": 150000,
 "total": 1447966682,
-"farmType": "dry",
 "coords": [
 [
 48.371402621269226,
@@ -1158,7 +1157,8 @@
 48.371402621269226,
 33.55722563828946
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "سرگه یازده بیری",
@@ -1166,10 +1166,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": false,
-"area": 1937.0,
+"area": 1937.0085416666666,
 "price": 120000,
 "total": 232441025,
-"farmType": "dry",
 "coords": [
 [
 48.371949791908264,
@@ -1211,7 +1210,8 @@
 48.371949791908264,
 33.55433327166113
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "یازده بیری جفت جاده",
@@ -1219,10 +1219,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": true,
-"area": 11027.0,
+"area": 11026.98042,
 "price": 150000,
 "total": 1654047063,
-"farmType": "dry",
 "coords": [
 [
 48.37616622447968,
@@ -1272,7 +1271,8 @@
 48.37616622447968,
 33.55413209881897
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "ربی زیر جلده بادیه",
@@ -1280,10 +1280,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": true,
-"area": 7429.0,
+"area": 7428.9958,
 "price": 150000,
 "total": 1114349370,
-"farmType": "dry",
 "coords": [
 [
 48.380559682846076,
@@ -1309,7 +1308,8 @@
 48.380559682846076,
 33.553457048747426
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "ربی نالشکناده",
@@ -1317,10 +1317,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": true,
-"area": 5230.4,
+"area": 5230.4487,
 "price": 150000,
 "total": 784567305,
-"farmType": "dry",
 "coords": [
 [
 48.37772727012635,
@@ -1346,7 +1345,8 @@
 48.37772727012635,
 33.55239305183271
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "نالشکناده بیست بیری",
@@ -1354,10 +1354,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": false,
-"area": 16288.6,
+"area": 16288.572975,
 "price": 120000,
 "total": 1954628757,
-"farmType": "dry",
 "coords": [
 [
 48.3754849433899,
@@ -1383,7 +1382,8 @@
 48.3754849433899,
 33.55200410851344
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "نالشکناده",
@@ -1391,10 +1391,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": false,
-"area": 8889.4,
+"area": 8889.350016666667,
 "price": 120000,
 "total": 1066722002,
-"farmType": "dry",
 "coords": [
 [
 48.37559223175049,
@@ -1416,7 +1415,8 @@
 48.37559223175049,
 33.55145422014326
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "نالشکناده مصطفی",
@@ -1424,10 +1424,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": false,
-"area": 8915.5,
+"area": 8915.505558333334,
 "price": 120000,
 "total": 1069860667,
-"farmType": "dry",
 "coords": [
 [
 48.37727665901185,
@@ -1449,7 +1448,8 @@
 48.37727665901185,
 33.551228451953406
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "جاروکو",
@@ -1457,10 +1457,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": false,
-"area": 11450.1,
+"area": 11450.071266666666,
 "price": 120000,
 "total": 1374008552,
-"farmType": "dry",
 "coords": [
 [
 48.37159037590027,
@@ -1482,7 +1481,8 @@
 48.37159037590027,
 33.547269589112936
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "گردنه یردگلو کوچک",
@@ -1490,10 +1490,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": false,
-"area": 2932.5,
+"area": 2932.496375,
 "price": 120000,
 "total": 351899565,
-"farmType": "dry",
 "coords": [
 [
 48.37015807628632,
@@ -1519,7 +1518,8 @@
 48.37015807628632,
 33.548136933134394
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "کره سه گوش",
@@ -1527,10 +1527,9 @@
 "scope": "rural_outside",
 "grade": "grade2",
 "special": false,
-"area": 3447.1,
+"area": 3447.0514375,
 "price": 80000,
 "total": 275764115,
-"farmType": "dry",
 "coords": [
 [
 48.377169370651245,
@@ -1548,7 +1547,8 @@
 48.377169370651245,
 33.541665174456824
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "کره کوچک",
@@ -1556,10 +1556,9 @@
 "scope": "rural_outside",
 "grade": "grade2",
 "special": false,
-"area": 1404.3,
+"area": 1404.2504625,
 "price": 80000,
 "total": 112340037,
-"farmType": "dry",
 "coords": [
 [
 48.381890058517456,
@@ -1581,7 +1580,8 @@
 48.381890058517456,
 33.5394183884276
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "کره پایین",
@@ -1589,10 +1589,9 @@
 "scope": "rural_outside",
 "grade": "grade3",
 "special": false,
-"area": 3906.2,
+"area": 3906.17976,
 "price": 25000,
 "total": 97654494,
-"farmType": "dry",
 "coords": [
 [
 48.381106853485115,
@@ -1611,22 +1610,11 @@
 33.5379115559243
 ],
 [
-48.38154673576355,
-33.5379115559243
-],
-[
-48.38154673576355,
-33.5379115559243
-],
-[
-48.38154673576355,
-33.5379115559243
-],
-[
 48.381106853485115,
 33.538126180555736
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "کره مهدی",
@@ -1634,10 +1622,9 @@
 "scope": "rural_outside",
 "grade": "grade3",
 "special": false,
-"area": 4569.3,
+"area": 4569.34392,
 "price": 25000,
 "total": 114233598,
-"farmType": "dry",
 "coords": [
 [
 48.382820785045624,
@@ -1707,7 +1694,8 @@
 48.382820785045624,
 33.53813288756688
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "کره عمو اسفندیار",
@@ -1715,10 +1703,9 @@
 "scope": "rural_outside",
 "grade": "grade3",
 "special": false,
-"area": 2577.6,
+"area": 2577.58468,
 "price": 25000,
 "total": 64439617,
-"farmType": "dry",
 "coords": [
 [
 48.38485926389694,
@@ -1772,7 +1759,8 @@
 48.38485926389694,
 33.53749795487116
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "گویژاو نوم",
@@ -1780,10 +1768,9 @@
 "scope": "rural_outside",
 "grade": "grade3",
 "special": false,
-"area": 3064.8,
+"area": 3064.819,
 "price": 25000,
 "total": 76620475,
-"farmType": "dry",
 "coords": [
 [
 48.40189397335053,
@@ -1805,7 +1792,8 @@
 48.40189397335053,
 33.53840116758596
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "نپه سبزه",
@@ -1813,10 +1801,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": false,
-"area": 5945.9,
+"area": 5945.931183333333,
 "price": 120000,
 "total": 713511742,
-"farmType": "dry",
 "coords": [
 [
 48.38972479104996,
@@ -1970,7 +1957,8 @@
 48.38972479104996,
 33.53662156123549
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "نثار",
@@ -1978,10 +1966,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": true,
-"area": 8149.9,
+"area": 8149.923906666667,
 "price": 150000,
 "total": 1222488586,
-"farmType": "dry",
 "coords": [
 [
 48.38784724473953,
@@ -2139,7 +2126,8 @@
 48.38784724473953,
 33.54236714339066
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "نثار بزرگ گندابه",
@@ -2147,10 +2135,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": true,
-"area": 14060.6,
+"area": 14060.599266666666,
 "price": 150000,
 "total": 2109089890,
-"farmType": "dry",
 "coords": [
 [
 48.38793843984604,
@@ -2328,7 +2315,8 @@
 48.38793843984604,
 33.543672701021634
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "ربی نثار گندابه",
@@ -2336,10 +2324,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": true,
-"area": 5850.4,
+"area": 5850.447093333333,
 "price": 150000,
 "total": 877567064,
-"farmType": "dry",
 "coords": [
 [
 48.38811546564102,
@@ -2521,18 +2508,18 @@
 48.38811546564102,
 33.543055693366284
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "دره گرمی دره دراز پشت راه — قسمت ۱ دره گرمی",
 "estate": "دره گرمی",
 "scope": "rural_outside",
 "grade": "grade1",
-"special": false,
-"area": 9000.0,
-"price": 120000,
-"total": 1080000000,
-"farmType": "dry",
+"special": true,
+"area": 9000,
+"price": 150000,
+"total": 1350000000,
 "coords": [
 [
 48.361403352666315,
@@ -2638,18 +2625,18 @@
 48.361403352666315,
 33.56474088617933
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "دره دراز پشت راه — قسمت ۲",
 "estate": "پدری",
 "scope": "rural_outside",
 "grade": "grade1",
-"special": false,
-"area": 7439.4,
-"price": 120000,
-"total": 892731908,
-"farmType": "dry",
+"special": true,
+"area": 7439.432566666666,
+"price": 150000,
+"total": 1115914885,
 "coords": [
 [
 48.361561596393585,
@@ -2739,7 +2726,8 @@
 48.361561596393585,
 33.565747937344476
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "دره دراز زیر راه",
@@ -2747,10 +2735,9 @@
 "scope": "rural_outside",
 "grade": "grade1",
 "special": false,
-"area": 17265.7,
+"area": 17265.656266666665,
 "price": 120000,
 "total": 2071878752,
-"farmType": "dry",
 "coords": [
 [
 48.36295634508133,
@@ -2888,7 +2875,8 @@
 48.36295634508133,
 33.56523390388849
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "هفت داره — قسمت ۱",
@@ -2896,10 +2884,9 @@
 "scope": "rural_outside",
 "grade": "grade2",
 "special": false,
-"area": 2901.2,
+"area": 2901.23525,
 "price": 80000,
 "total": 232098820,
-"farmType": "dry",
 "coords": [
 [
 48.356293737888336,
@@ -2989,7 +2976,8 @@
 48.356293737888336,
 33.55447855494629
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "هفت داره — قسمت ۲",
@@ -2997,10 +2985,9 @@
 "scope": "rural_outside",
 "grade": "grade2",
 "special": false,
-"area": 2901.2,
+"area": 2901.23525,
 "price": 80000,
 "total": 232098820,
-"farmType": "dry",
 "coords": [
 [
 48.356395329029745,
@@ -3082,7 +3069,8 @@
 48.356395329029745,
 33.554155243832355
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "دره رضاخونی بغل راه",
@@ -3090,10 +3078,9 @@
 "scope": "rural_outside",
 "grade": "grade3",
 "special": false,
-"area": 2216.2,
+"area": 2216.22396,
 "price": 25000,
 "total": 55405599,
-"farmType": "dry",
 "coords": [
 [
 48.36152940988541,
@@ -3279,7 +3266,8 @@
 48.36152940988541,
 33.54644918095687
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "دره رضاخونی سرماز",
@@ -3287,10 +3275,9 @@
 "scope": "rural_outside",
 "grade": "grade3",
 "special": false,
-"area": 1434.6,
+"area": 1434.57792,
 "price": 25000,
 "total": 35864448,
-"farmType": "dry",
 "coords": [
 [
 48.360789120197296,
@@ -3460,7 +3447,8 @@
 48.360789120197296,
 33.54523755575567
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "دره رضا خونی",
@@ -3468,10 +3456,9 @@
 "scope": "rural_outside",
 "grade": "grade3",
 "special": false,
-"area": 1927.5,
+"area": 1927.46836,
 "price": 25000,
 "total": 48186709,
-"farmType": "dry",
 "coords": [
 [
 48.362334072589874,
@@ -3641,19 +3628,8 @@
 48.362334072589874,
 33.5455549942589
 ]
-]
-},
-{
-"name": "دم گر",
-"estate": "پدری",
-"scope": "rural_outside",
-"grade": "grade1",
-"special": false,
-"area": 5032.6,
-"price": 120000,
-"total": 603906978,
-"farmType": "dry",
-"coords": null
+],
+"farmType": "dry"
 },
 {
 "name": "بردگلو برافتاب",
@@ -3661,10 +3637,9 @@
 "scope": "rural_outside",
 "grade": "grade2",
 "special": true,
-"area": 2734.1,
+"area": 2734.11781,
 "price": 100000,
 "total": 273411781,
-"farmType": "dry",
 "coords": [
 [
 48.36716204881668,
@@ -3850,7 +3825,8 @@
 48.36716204881668,
 33.54365928785859
 ]
-]
+],
+"farmType": "dry"
 },
 {
 "name": "وسط راه بردگلو",
@@ -3858,10 +3834,9 @@
 "scope": "rural_outside",
 "grade": "grade2",
 "special": false,
-"area": 2253.7,
+"area": 2253.7117625,
 "price": 80000,
 "total": 180296941,
-"farmType": "dry",
 "coords": [
 [
 48.3662286400795,
@@ -4007,66 +3982,109 @@
 48.3662286400795,
 33.54323900769486
 ]
+],
+"farmType": "dry"
+},
+{
+"name": "زمین قبرستان جدید",
+"estate": "پدری",
+"scope": "rural_outside",
+"grade": "grade2",
+"special": false,
+"area": 11276.119783817418,
+"price": 60000,
+"total": 676567187,
+"coords": [
+[
+48.36124777793885,
+33.54739030246218
+],
+[
+48.360416293144226,
+33.5480430457997
+],
+[
+48.360652327537544,
+33.54821293709253
+],
+[
+48.361462354660034,
+33.54768537882821
+],
+[
+48.36157500743867,
+33.54774797065508
+],
+[
+48.362690806388855,
+33.547193584325036
+],
+[
+48.36251378059387,
+33.54690297716661
+],
+[
+48.36227238178254,
+33.54679120492236
+],
+[
+48.36193978786469,
+33.54692533159812
+],
+[
+48.36153745651246,
+33.547059458065675
+],
+[
+48.361151218414314,
+33.54725170563946
+],
+[
+48.36124777793885,
+33.54739030246218
 ]
+],
+"farmType": "dry"
 },
 {
-"name": "کنار باغ حمید",
+"name": "دره حویردی",
 "estate": "پدری",
 "scope": "rural_outside",
-"grade": "grade2",
+"grade": "grade3",
 "special": false,
-"area": 1847.2,
-"price": 80000,
-"total": 147778662,
-"farmType": "dry",
-"coords": null
-},
-{
-"name": "گرچپشی",
-"estate": "پدری",
-"scope": "rural_outside",
-"grade": "grade2",
-"special": false,
-"area": 6518.8,
-"price": 80000,
-"total": 521500126,
-"farmType": "dry",
-"coords": null
-},
-{
-"name": "پویزلکو",
-"estate": "پدری",
-"scope": "rural_outside",
-"grade": "grade1",
-"special": true,
-"area": 5230.4,
-"price": 150000,
-"total": 784565656,
-"farmType": "dry",
-"coords": null
-},
-{
-"name": "قیرستان",
-"estate": "پدری",
-"scope": "rural_outside",
-"grade": "grade1",
-"special": true,
-"area": 6524.3,
-"price": 150000,
-"total": 978650738,
-"farmType": "dry",
-"coords": null
-},
-{
-"name": "دراشکفت",
-"estate": "پدری",
-"scope": "rural_outside",
-"grade": "grade2",
-"special": true,
-"area": 3470.1,
-"price": 100000,
-"total": 347011852,
-"farmType": "dry",
-"coords": null
+"area": 2601.825705268649,
+"price": 30000,
+"total": 78054771,
+"coords": [
+[
+48.35051894187928,
+33.54941557906085
+],
+[
+48.35001468658448,
+33.54955417241272
+],
+[
+48.34984302520753,
+33.549062388546055
+],
+[
+48.34981083869935,
+33.548829907925615
+],
+[
+48.35000395774842,
+33.54878520004229
+],
+[
+48.350143432617195,
+33.54906685932109
+],
+[
+48.35051894187928,
+33.54941557906085
+]
+],
+"farmType": "dry"
 }
 ]

@@ -1719,11 +1719,23 @@
     }
 
     // تعدیل‌های جمع و تفریقی هر نفر (مثلاً «-9000000000» بابت خرید یا «+3000000000» بابت فروش)
-    const adjF = persons.map(p => {
+    // «خانه‌ی شهر»: هر گیرنده مبلغ ثابتی می‌گیرد و پرداخت‌کننده مجموع آن را از سهم خود می‌دهد
+    const houseF = persons.map(() => F0());
+    if (sc.house && sc.house.amount != null && String(sc.house.amount).trim() !== '') {
+      const amt = parseAdjust(sc.house.amount);
+      if (amt === null || fSign(amt) < 0) errors.push('مبلغ «سهم هر پسر از خانه‌ی شهر» نامعتبر است');
+      else if (fSign(amt) > 0) {
+        const rec = persons.map((p, i) => ((sc.house.receivers || []).indexOf(p.id) >= 0 ? i : -1)).filter(i => i >= 0);
+        const pi = persons.findIndex(p => p.id === sc.house.payer);
+        rec.forEach(i => { houseF[i] = fAdd(houseF[i], amt); });
+        if (pi >= 0) houseF[pi] = fSub(houseF[pi], fMul(amt, frac(rec.filter(i => i !== pi).length)));
+      }
+    }
+    const adjF = persons.map((p, i) => {
       const txt = (sc.adjust || {})[p.id];
       const f = parseAdjust(txt);
-      if (f === null) { errors.push('تعدیل «' + p.name + '» نامعتبر است («' + txt + '»)؛ مثل +3000000000 یا -9000000000 بنویسید'); return F0(); }
-      return f;
+      if (f === null) { errors.push('تعدیل «' + p.name + '» نامعتبر است («' + txt + '»)؛ مثل +3000000000 یا -9000000000 بنویسید'); return houseF[i]; }
+      return fAdd(f, houseF[i]);
     });
     const res = persons.map((p, i) => ({
       person: p, index: i, weightFrac: wFs[i],
@@ -1854,7 +1866,7 @@
       r.finalValue = Math.round(fToNumber(r.finalValueF)); r.cashNet = Math.round(fToNumber(r.cashNetF));
       r.finalDiffExact = fToNumber(fd); r.finalDiff = Math.round(r.finalDiffExact);
       r.short = -r.finalDiff;                       // مثبت: هنوز باید بگیرد، منفی: بیش از حق دارد
-      r.adjust = Math.round(fToNumber(r.adjF)); r.adjustText = (sc.adjust || {})[r.person.id] || '';
+      r.houseAdj = Math.round(fToNumber(houseF[r.index])); r.adjust = Math.round(fToNumber(r.adjF)); r.otherAdj = r.adjust - r.houseAdj; r.adjustText = (sc.adjust || {})[r.person.id] || '';
       r.creditExact = r.entitledExact + fToNumber(r.adjF); r.credit = Math.round(r.creditExact); r.remaining = -r.finalDiff;
       r.shortPct = r.creditExact ? (-r.finalDiffExact / r.creditExact) * 100 : 0;
       r.shortArea = avgPrice > 0 ? -r.finalDiffExact / avgPrice : 0;   // معادل تقریبی مساحت با میانگین قیمت همین پرونده

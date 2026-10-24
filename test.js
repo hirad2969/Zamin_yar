@@ -933,11 +933,11 @@ t('تعدیل جمع و تفریقی: +/− روی حق هر نفر؛ مانده
   eq(C.fText(C.parseAdjust('')), '0'); ok(C.parseAdjust('+-5') === null);
 });
 
-t('فهرست پیش‌فرض (js/seed.js): ۵۳ زمین با ارزش دقیق، پرونده‌ی آماده و حق هر نفر', () => {
+t('فهرست پیش‌فرض (js/seed.js): ۴۹ زمین با ارزش دقیق، پرونده‌ی آماده و حق هر نفر', () => {
   const w = {}; new Function('window', require('fs').readFileSync(__dirname + '/js/seed.js', 'utf8'))(w);
   const st = w.ZY_SEED;
-  eq(st.parcels.length, 53); eq(st.persons.length, 4);
-  eq(st.parcels.reduce((a, p) => a + p.valuation.total, 0), 42101087256);
+  eq(st.parcels.length, 49); eq(st.persons.length, 4);
+  eq(st.parcels.reduce((a, p) => a + p.valuation.total, 0), 39965478179);
   ok(st.parcels.every(p => p.valuation.status === 'قطعی'), 'وضعیت همه‌ی زمین‌ها قطعی نیست');
   const sc = st.scenarios.find(x => x.live); ok(sc && sc.sections.length === 2, 'پرونده‌ی آماده');
   const ev = C.evaluateScenario(st, sc);
@@ -946,6 +946,14 @@ t('فهرست پیش‌فرض (js/seed.js): ۵۳ زمین با ارزش دقیق
   const M = ev.results.find(r => r.person.name === 'مصطفی'), A = ev.results.find(r => r.person.name === 'امیر'), H = ev.results.find(r => /مهدی/.test(r.person.name));
   near(M.entitledExact, dg * 8 / 21 + pd / 7, 0.01); near(A.entitledExact, dg / 21 + pd / 7, 0.01); near(H.entitledExact, dg * 4 / 21 + pd * 4 / 7, 0.01);
   near(ev.results.reduce((a, r) => a + r.entitledExact, 0), ev.pool, 0.01);
+  // خانه‌ی شهر: هر پسر +۳ میلیارد، مهدی −۹ میلیارد؛ جمع اعتبارها = ارزش کل
+  eq(M.houseAdj, 3000000000); eq(H.houseAdj, -9000000000);
+  near(M.creditExact, M.entitledExact + 3e9, 0.01); near(H.creditExact, H.entitledExact - 9e9, 0.01);
+  near(ev.results.reduce((a, r) => a + r.creditExact, 0), ev.pool, 0.01);
+  ok(!ev.checks.some(k => k.id === 'adjust_balance'), 'جمع تعدیل‌ها صفر نیست');
+  // «سایر» روی امیر: +۵۰۰ میلیون ⇒ جمع تعدیل‌ها صفر نیست و هشدار می‌دهد
+  sc.adjust = { [A.person.id]: '+500000000' };
+  ok(C.evaluateScenario(st, sc).checks.some(k => k.id === 'adjust_balance' && !k.ok));
 });
 
 (async () => {

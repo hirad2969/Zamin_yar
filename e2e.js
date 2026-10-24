@@ -10,7 +10,7 @@ const near = (a, b, t, m) => { if (!isFinite(a) || Math.abs(a - b) > t) throw ne
 (async () => {
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] }).catch(() => chromium.launch({ args: ['--no-sandbox'] }));
   const ctx = await browser.newContext({ viewport: { width: 1500, height: 900 }, locale: 'fa-IR' });
-  const page = await ctx.newPage(); await page.addInitScript(() => { window.ZY_NOSEED = true; });
+  const page = await ctx.newPage(); await page.addInitScript(() => { window.ZY_NOSEED = true; try { localStorage.setItem('zy-adv', '1'); } catch (e) {} });
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource|net::ERR/.test(m.text())) errors.push('console: ' + m.text()); });

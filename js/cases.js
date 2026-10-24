@@ -376,5 +376,217 @@
     App.downloadBlob((sc.name || 'پرونده') + '.xlsx', new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
   }
 
-  App.cases = { mount, textOf, open: (id) => { curId = id; curTab = 'setup'; } };
+
+  /* =====================================================================
+     حالت ساده: یک صفحه برای همه — سهم‌ها در یک کادر، انتخاب زمین با یک لیست،
+     مانده‌ی اعتبار زنده، و ارسال/دریافت انتخاب شرکا با «کد»
+     ===================================================================== */
+  const advOn = () => { try { return localStorage.getItem('zy-adv') === '1'; } catch (e) { return false; } };
+  const setAdv = (v) => { try { localStorage.setItem('zy-adv', v ? '1' : '0'); } catch (e) { /* ignore */ } };
+
+  function mkPerm(sc, pid, parcelId) {           // تخصیص کل زمین به یک نفر (یا هیچ‌کس)
+    if (!pid) { delete sc.allocations[parcelId]; return; }
+    delete sc.allocations[parcelId];
+    C.setAllocation(sc, parcelId, pid, 1);
+  }
+  function holderOf(sc, parcelId) {
+    const al = (sc.allocations || {})[parcelId] || [];
+    if (!al.length) return { pid: '', shared: false };
+    if (al.length === 1 && C.fCmp(C.allocFrac(al[0]), C.frac(1)) === 0) return { pid: al[0].personId, shared: false };
+    return { pid: '', shared: true };
+  }
+  const b64e = (o) => btoa(unescape(encodeURIComponent(JSON.stringify(o))));
+  const b64d = (t) => JSON.parse(decodeURIComponent(escape(atob(t))));
+
+  function simple(r, rerender) {
+    const S = App.S;
+    let sc = S.scenarios.find(x => x.live && x.id === curId) || S.scenarios.find(x => x.live);
+    r.appendChild(el('h2', { text: 'تقسیم زمین‌ها' }));
+    if (!sc) {
+      r.appendChild(el('div', { class: 'box info', text: 'هنوز پرونده‌ی تقسیمی ساخته نشده است.' }));
+      r.appendChild(el('button', { class: 'btn', id: 'case-new-simple', text: 'ساخت پرونده از همه‌ی زمین‌ها و اشخاص', onclick: () => {
+        if (!S.parcels.length) { App.toast('ابتدا زمین ثبت کنید', 'warn'); return; }
+        const c = C.createCase(S, 'تقسیم نهایی', null, null); C.sectionsFromEstates(S, c); curId = c.id; App.save(); rerender();
+      } }));
+      return;
+    }
+    curId = sc.id;
+    const persons = S.persons.filter(p => (sc.personIds || []).indexOf(p.id) >= 0);
+    const parcels = S.parcels.filter(p => (sc.parcelIds || []).indexOf(p.id) >= 0);
+    const boxSum = el('div', { class: 'card', id: 'sum-box' }), boxStrip = el('div', { id: 'strip-box' }), boxPick = el('div', { class: 'card', id: 'pick-box' }),
+      boxCode = el('div', { class: 'card', id: 'code-box' }), boxRes = el('div', { class: 'card', id: 'res-box' });
+    let ev = null;
+    const recalc = () => { ev = evalSafe(sc); };
+    const upd = () => { App.save(); recalc(); drawSum(); drawStrip(); drawRes(); refreshRows(); };
+
+    /* ---- ۱) سهم‌ها و حساب کل ---- */
+    function drawSum() {
+      boxSum.innerHTML = '';
+      boxSum.appendChild(el('h3', { style: 'margin-top:0', text: '۱) سهم هر نفر و جمع کل' }));
+      if (!ev) { boxSum.appendChild(el('div', { class: 'box err', text: 'محاسبه ممکن نشد.' })); return; }
+      boxSum.appendChild(el('div', { class: 'note', text: 'همه‌ی ارزش‌ها با یک قیمت برای همه حساب شده است. عددهای سبز را می‌توان عوض کرد؛ بقیه خودکار حساب می‌شود.' }));
+      // خلاصه‌ی هر بخش
+      (ev.sections || []).forEach(sec => { if (sec.count === 0) return;
+        boxSum.appendChild(el('div', { class: 'box info', style: 'margin:4px 0', html: '<b>' + App.esc(sec.name) + '</b> — ارزش: <b>' + toman(sec.poolExact) + ' تومان</b> (' + App.n(sec.count, 0) + ' زمین) — جمع سهم‌ها: <b>' + fa(sec.weightSum) + '</b>' })); });
+      const h = sc.house || (sc.house = { amount: '', receivers: [], payer: '' });
+      boxSum.appendChild(el('div', { class: 'row', style: 'margin:6px 0' }, [el('b', { text: 'سهم هر پسر از خانه‌ی شهر (تومان):' }),
+        el('input', { type: 'text', dir: 'ltr', style: 'width:150px;border-color:#9fd69b', value: h.amount || '', placeholder: 'مثلاً 3000000000', onchange: (e) => { if (C.parseAdjust(e.target.value) === null) { App.toast('مبلغ نامعتبر است', 'warn'); return; } h.amount = e.target.value.trim(); upd(); } }),
+        el('span', { class: 'note', text: '← به سه پسر اضافه و از سهم مهدی کم می‌شود' })]));
+      const line = (k, v, cls) => el('div', { style: 'display:flex;justify-content:space-between;gap:8px;border-bottom:1px dotted var(--line);padding:3px 0;align-items:center' }, [el('span', { class: 'note', text: k }), el('span', { class: cls || '', style: 'font-weight:700', text: v })]);
+      const cards = ev.results.map(x => {
+        const kids = [el('div', { style: 'font-size:16px;font-weight:700;margin-bottom:4px', text: x.person.name })];
+        (ev.sections || []).forEach(sec => {
+          if (sec.count === 0) return;
+          const secObj = (sc.sections || []).find(s => s.id === sec.id);
+          const row = sec.rows.find(q => q.personId === x.person.id) || {};
+          const w = secObj && secObj.weights[x.person.id];
+          kids.push(el('div', { style: 'border-bottom:1px dotted var(--line);padding:4px 0' }, [
+            el('div', { style: 'display:flex;align-items:center;gap:6px' }, [el('b', { style: 'flex:1', text: sec.name }), el('span', { class: 'note', text: 'سهم:' }),
+              el('input', { type: 'text', dir: 'ltr', style: 'width:56px;border-color:#9fd69b;text-align:center', value: w ? w.text : '', onchange: (e) => { if (C.setSectionWeight(sc, sec.id, x.person.id, e.target.value) === null) App.toast('عدد نامعتبر است', 'warn'); upd(); } }),
+              el('span', { class: 'note', text: row.fracText ? '= ' + fa(row.fracText) : '' })]),
+            el('div', { style: 'text-align:end;font-weight:700', text: row.valueExact != null ? toman(row.valueExact) + ' تومان' : '—' })]));
+        });
+        kids.push(line('خانه‌ی شهر', x.houseAdj ? (x.houseAdj > 0 ? '+' : '−') + toman(Math.abs(x.houseAdj)) : '—', x.houseAdj < 0 ? 'neg' : x.houseAdj > 0 ? 'pos' : ''));
+        kids.push(el('div', { style: 'display:flex;align-items:center;gap:6px;border-bottom:1px dotted var(--line);padding:3px 0' }, [el('span', { class: 'note', style: 'white-space:nowrap', text: 'سایر (+/−):' }),
+          el('input', { type: 'text', dir: 'ltr', style: 'flex:1;border-color:#9fd69b', value: x.adjustText || '', placeholder: x.person.name === 'امیر' ? '+ مبلغ زمین تیرنازو' : '+ یا − مبلغ', onchange: (e) => {
+            if (C.parseAdjust(e.target.value) === null) { App.toast('نامعتبر است؛ مثل +500000000 یا -1000000', 'warn'); return; }
+            sc.adjust = sc.adjust || {}; const v = e.target.value.trim(); if (v) sc.adjust[x.person.id] = v; else delete sc.adjust[x.person.id]; upd();
+          } })]));
+        kids.push(el('div', { style: 'background:var(--sel);border-radius:8px;padding:6px;margin:6px 0;display:flex;justify-content:space-between', html: '<b>جمع کل (اعتبار)</b><b>' + toman(x.creditExact) + '</b>' }));
+        kids.push(line('زمین‌های انتخاب‌شده', toman(x.finalValue)));
+        kids.push(el('div', { class: x.remaining >= 0 ? 'pos' : 'neg', style: 'text-align:center;font-size:16px;margin-top:4px', html: (x.remaining >= 0 ? 'مانده‌ی اعتبار: ' : 'بیش از اعتبار: ') + '<b>' + toman(Math.abs(x.remaining)) + '</b>' }));
+        return el('div', { 'data-pid': x.person.id, style: 'background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px' }, kids);
+      });
+      boxSum.appendChild(el('div', { id: 'sum-table', style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:10px;margin-top:8px' }, cards));
+      boxSum.appendChild(el('div', { class: 'note', html: 'ارزش کل: <b>' + toman(ev.poolExact) + ' تومان</b> — ' + App.n(parcels.length, 0) + ' زمین. «مانده‌ی اعتبار» منفی یعنی بیش از اعتبارش زمین برداشته است.' }));
+      const ab = ev.checks.find(k => k.id === 'adjust_balance');
+      if (ab) boxSum.appendChild(el('div', { class: 'note', text: 'توجه: ' + ab.msg }));
+      ev.errors.forEach(e => boxSum.appendChild(el('div', { class: 'box err', text: e })));
+    }
+
+    /* ---- نوار ثابت مانده‌ی اعتبار ---- */
+    function drawStrip() {
+      boxStrip.innerHTML = '';
+      if (!ev) return;
+      boxStrip.appendChild(el('div', { style: 'position:sticky;top:0;z-index:20;background:#fff;border:2px solid var(--pri);border-radius:10px;padding:6px;margin-bottom:8px;display:flex;flex-wrap:wrap;gap:6px;box-shadow:0 2px 6px rgba(0,0,0,.15)' },
+        ev.results.map(x => el('div', { style: 'flex:1 1 120px;text-align:center;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:3px' }, [el('div', { text: x.person.name }), el('b', { class: x.remaining >= 0 ? 'pos' : 'neg', text: (x.remaining < 0 ? '−' : '') + toman(Math.abs(x.remaining)) })]))));
+    }
+
+    /* ---- ۲) انتخاب زمین ---- */
+    const rowMap = [];
+    function refreshRows() {
+      rowMap.forEach(rw => { const h = holderOf(sc, rw.id); rw.sel.value = h.shared ? '__shared' : h.pid; rw.tr.style.background = h.pid ? '#e9f6ec' : h.shared ? '#fff6e0' : ''; });
+    }
+    function drawPick() {
+      boxPick.innerHTML = ''; rowMap.length = 0;
+      boxPick.appendChild(el('h3', { style: 'margin-top:0', text: '۲) انتخاب زمین‌ها' }));
+      boxPick.appendChild(el('div', { class: 'note', text: 'جلوی هر زمین بزنید «کیست؟» و اسم خودتان را انتخاب کنید. ارزش آن زمین همان لحظه از اعتبارتان کم می‌شود (نوار بالا).' }));
+      const q = el('input', { type: 'search', placeholder: 'جست‌وجو (مثلاً دره گرمی)' });
+      const flt = el('select', null, [['', 'همه‌ی زمین‌ها'], ['free', 'فقط انتخاب‌نشده‌ها'], ['dg', 'فقط دره گرمی'], ['pd', 'فقط پدری']].map(a => el('option', { value: a[0], text: a[1] })));
+      boxPick.appendChild(el('div', { class: 'row' }, [el('div', { class: 'grow' }, q), el('div', null, flt)]));
+      boxPick.appendChild(boxStrip);
+      const estName = (p) => { const e = (S.estates || []).find(x => x.id === p.estateId); return e ? e.name : ''; };
+      const list = el('div', { style: 'border:1px solid var(--line);border-radius:8px;background:#fff' });
+      parcels.forEach(p => {
+        const v = p.valuation || {};
+        const sel = el('select', { style: 'min-width:120px' }, [el('option', { value: '', text: '— کیست؟ —' })].concat(persons.map(x => el('option', { value: x.id, text: x.name })), [el('option', { value: '__shared', text: 'مشترک (چند نفر)', disabled: true })]));
+        sel.addEventListener('change', () => { if (sel.value === '__shared') return; mkPerm(sc, sel.value, p.id); upd(); });
+        const tr = el('div', { style: 'display:flex;gap:8px;align-items:center;justify-content:space-between;padding:6px 8px;border-bottom:1px solid var(--line);flex-wrap:wrap' }, [
+          el('div', { style: 'flex:1 1 180px' }, [el('b', { text: p.name || '—' }), el('div', { class: 'note', text: estName(p) + ' — ' + App.n(v.area, 0) + ' م² — ' + (C.GRADES[p.grade] || '') + (p.special ? ' ویژه' : '') })]),
+          el('div', { style: 'font-weight:700;white-space:nowrap', text: toman(v.total || 0) + ' ت' }), sel]);
+        tr._p = p; tr._est = estName(p); list.appendChild(tr); rowMap.push({ id: p.id, sel, tr });
+      });
+      const apply = () => {
+        const t = C.normDigits(q.value).trim().toLowerCase();
+        rowMap.forEach(rw => {
+          const p = rw.tr._p, h = holderOf(sc, p.id); const hay = ((p.name || '') + ' ' + rw.tr._est).toLowerCase();
+          let ok = !t || hay.indexOf(t) >= 0;
+          if (flt.value === 'free') ok = ok && !h.pid && !h.shared; else if (flt.value === 'dg') ok = ok && /دره گرمی/.test(rw.tr._est); else if (flt.value === 'pd') ok = ok && /پدری/.test(rw.tr._est);
+          rw.tr.style.display = ok ? 'flex' : 'none';
+        });
+      };
+      q.addEventListener('input', apply); flt.addEventListener('change', apply);
+      boxPick.appendChild(list);
+      refreshRows();
+    }
+
+    /* ---- ۳) ارسال و دریافت انتخاب‌ها ---- */
+    function drawCode() {
+      boxCode.innerHTML = '';
+      boxCode.appendChild(el('h3', { style: 'margin-top:0', text: '۳) ارسال انتخاب من / دریافت انتخاب شرکا' }));
+      boxCode.appendChild(el('div', { class: 'note', text: 'انتخاب‌های هرکس فقط روی گوشی خودش می‌ماند. برای اینکه نسخه‌ی اصلی متوجه شود: شریک «کد انتخاب» می‌سازد و می‌فرستد؛ نسخه‌ی اصلی آن را اینجا وارد می‌کند.' }));
+      const who = el('select', null, persons.map(x => el('option', { value: x.id, text: x.name })));
+      const out = el('textarea', { readonly: true, style: 'min-height:60px;direction:ltr;font-size:11px', placeholder: 'کد اینجا ساخته می‌شود' });
+      boxCode.appendChild(el('div', { class: 'f' }, [el('span', { text: 'من کیستم؟ (برای ارسال انتخاب)' }), who]));
+      boxCode.appendChild(el('div', { class: 'row' }, [
+        el('button', { class: 'btn', id: 'code-make', text: 'ساخت کد انتخاب من', onclick: () => {
+          const x = ev && ev.results.find(r => r.person.id === who.value); if (!x) return;
+          const picks = x.finalLines.map(l => { const pc = parcels.find(p => p.name === l.name); return [l.name, Math.round(pc && pc.valuation ? pc.valuation.total : 0), l.fractionText]; });
+          out.value = 'ZY1:' + b64e({ v: 1, who: x.person.name, at: C.nowIso(), pool: ev.pool, credit: x.credit, picks });
+          out.select();
+        } }),
+        el('button', { class: 'btn sec2', text: 'کپی', onclick: () => { if (!out.value) return; out.select(); try { document.execCommand('copy'); App.toast('کپی شد؛ همین را برای نسخه‌ی اصلی بفرستید', 'ok'); } catch (e) { App.toast('کد را دستی کپی کنید', 'warn'); } if (navigator.share) navigator.share({ text: out.value }).catch(() => { }); } })]));
+      boxCode.appendChild(out);
+      const inp = el('textarea', { id: 'code-in', style: 'min-height:70px;direction:ltr;font-size:11px;margin-top:10px', placeholder: 'کدهای شرکا را اینجا بچسبانید (چند کد پشت سر هم هم می‌شود)' });
+      const rep = el('div', { id: 'code-report' });
+      boxCode.appendChild(el('div', { class: 'note', style: 'margin-top:10px', text: 'فقط برای نسخه‌ی اصلی: دریافت انتخاب شرکا' }));
+      boxCode.appendChild(inp);
+      boxCode.appendChild(el('button', { class: 'btn sec2', id: 'code-apply', text: 'اعمال انتخاب‌های دریافتی', onclick: () => { rep.innerHTML = ''; applyCodes(inp.value, rep); inp.value = ''; upd(); drawCode2(rep); } }));
+      boxCode.appendChild(rep);
+      drawCode2(rep);
+    }
+    function drawCode2(rep) {
+      const got = Object.keys(sc.received || {});
+      if (!got.length || rep.querySelector('[data-keep]')) return;
+      const box = el('div', { 'data-keep': '1' }, [el('div', { class: 'note', style: 'margin-top:8px', text: 'آخرین انتخاب‌های دریافت‌شده:' }),
+        el('ul', { class: 'hist' }, got.map(pid => { const rc = sc.received[pid]; return el('li', { text: pName(pid) + ' — ' + App.n(rc.n, 0) + ' زمین — ' + App.fmtDate(rc.at) + (rc.warn ? ' ⚠ ' + rc.warn : ' ✔') }); }))]);
+      rep.appendChild(box);
+    }
+    function applyCodes(text, rep) {
+      const codes = String(text || '').split(/\s+/).filter(t => /^ZY1:/.test(t));
+      if (!codes.length) { rep.appendChild(el('div', { class: 'box warn', text: 'کدی پیدا نشد (باید با ZY1: شروع شود).' })); return; }
+      codes.forEach(c => {
+        let d; try { d = b64d(c.slice(4)); } catch (e) { rep.appendChild(el('div', { class: 'box err', text: 'یک کد خراب است و نادیده گرفته شد.' })); return; }
+        const person = persons.find(p => p.name === d.who);
+        if (!person) { rep.appendChild(el('div', { class: 'box err', text: 'شخص «' + d.who + '» در این نسخه نیست.' })); return; }
+        const warns = [];
+        Object.keys(sc.allocations).forEach(k => { sc.allocations[k] = sc.allocations[k].filter(a => a.personId !== person.id); if (!sc.allocations[k].length) delete sc.allocations[k]; });
+        let n = 0;
+        (d.picks || []).forEach(pk => {
+          const pc = parcels.find(p => p.name === pk[0]);
+          if (!pc) { warns.push('زمین «' + pk[0] + '» پیدا نشد'); return; }
+          if (pc.valuation && Math.round(pc.valuation.total) !== Math.round(pk[1])) warns.push('ارزش «' + pk[0] + '» با نسخه‌ی شریک فرق دارد');
+          const s = C.parseShare(pk[2] || '1/1'); if (s && s.frac) { C.setAllocation(sc, pc.id, person.id, s.frac); n++; }
+        });
+        recalc();
+        const mine = ev && ev.results.find(r => r.person.id === person.id);
+        if (ev && Math.abs(ev.pool - d.pool) > 1) warns.push('ارزش کل در نسخه‌ی شریک فرق دارد (' + toman(d.pool) + ')');
+        if (mine && Math.abs(mine.credit - d.credit) > 1) warns.push('اعتبار او در نسخه‌ی شریک ' + toman(d.credit) + ' بوده و در نسخه‌ی شما ' + toman(mine.credit) + ' است');
+        sc.received = sc.received || {}; sc.received[person.id] = { at: d.at || C.nowIso(), n, warn: warns.join('؛ ') };
+        rep.appendChild(el('div', { class: 'box ' + (warns.length ? 'warn' : 'ok'), text: person.name + ': ' + App.n(n, 0) + ' زمین ثبت شد' + (warns.length ? ' — ' + warns.join('؛ ') : '') }));
+      });
+      recalc();
+      const clash = parcels.filter(p => C.fCmp(C.allocSum(sc, p.id), C.frac(1)) > 0);
+      if (clash.length) rep.appendChild(el('div', { class: 'box err', text: 'تداخل: این زمین‌ها را بیش از یک نفر انتخاب کرده‌اند: ' + clash.map(p => p.name + ' (' + ((sc.allocations[p.id] || []).map(a => pName(a.personId)).join(' و ')) + ')').join('، ') }));
+    }
+
+    /* ---- ۴) لیست نهایی ---- */
+    function drawRes() {
+      boxRes.innerHTML = '';
+      boxRes.appendChild(el('h3', { style: 'margin-top:0', text: '۴) لیست نهایی زمین‌های هر نفر' }));
+      if (!ev) return;
+      boxRes.appendChild(el('div', { class: 'row' }, [
+        el('button', { class: 'btn', text: '🖨 چاپ', onclick: () => printResult(sc, ev) }),
+        el('button', { class: 'btn sec2', text: '💾 ذخیره‌ی برگه', onclick: () => saveSheet(sc, ev) }),
+        el('button', { class: 'btn sec2', text: '📊 اکسل', onclick: () => exportXlsx(sc, ev) }),
+        el('button', { class: 'btn sec2', text: '📋 کپی متن', onclick: () => copyText(sc, ev) })]));
+      ev.results.forEach(x => boxRes.appendChild(personList(x)));
+      if (ev.settlement.length) boxRes.appendChild(el('div', { class: 'box info' }, [el('b', { text: 'تسویه‌ی پیشنهادی' }), el('ul', { class: 'hist' }, ev.settlement.map(s => el('li', { text: s.fromName + ' ← ' + toman(s.amountExact) + ' تومان به ' + s.toName })))]));
+    }
+
+    recalc(); drawSum(); drawStrip(); drawPick(); drawCode(); drawRes();
+    [boxSum, boxPick, boxCode, boxRes].forEach(b => r.appendChild(b));
+  }
+
+  App.cases = { mount, simple, advOn, setAdv, textOf, open: (id) => { curId = id; curTab = 'setup'; } };
 })();
