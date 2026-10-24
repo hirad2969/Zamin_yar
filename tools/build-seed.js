@@ -4,7 +4,7 @@ const fs = require('fs'), path = require('path');
 const C = require('../core.js');
 const rows = JSON.parse(fs.readFileSync(path.join(__dirname, 'seed-source.json'), 'utf8'));
 const st = C.newState();
-const estD = C.addEstate(st, 'اموال دره گرمی'), estP = C.addEstate(st, 'اموال پدری');
+const estD = C.addEstate(st, 'دره گرمی'), estP = C.addEstate(st, 'پدری'), estS = C.addEstate(st, 'محدوده سد');   // سد: بدون زمین؛ سهم‌بندی مثل پدری
 const bad = [];
 rows.forEach(r => {
   const attrs = { residential: r.residential || 'unknown', agri: r.agri || 'none', farmType: r.farmType || 'irrigated', urbanUse: 'residential' };
@@ -18,14 +18,13 @@ rows.forEach(r => {
 if (bad.length) { console.error('ناهمخوانی:\n' + bad.join('\n')); process.exit(1); }
 const names = ['مصطفی', 'اسفندیار', 'امیر', 'مهدی (و شرکا)'];
 const P = names.map(n => C.addPerson(st, n, 1));
-[[8, 8, 1, 4], [1, 1, 1, 4]].forEach((ws, i) => P.forEach((p, j) => C.setEstateWeight(st, i === 0 ? estD.id : estP.id, p.id, String(ws[j]))));
-const sc = C.createCase(st, 'تقسیم نهایی همه‌ی زمین‌ها', st.parcels.map(p => p.id), P.map(p => p.id));
-C.sectionsFromEstates(st, sc);
-// سهم هر پسر از خانه‌ی شهر: ۳ میلیارد؛ از سهم مهدی کم می‌شود
-sc.house = { amount: '3000000000', receivers: [P[0].id, P[1].id, P[2].id], payer: P[3].id };
+[[8, 8, 1, 4], [1, 1, 1, 4], [1, 1, 1, 4]].forEach((ws, i) => P.forEach((p, j) => C.setEstateWeight(st, [estD, estP, estS][i].id, p.id, String(ws[j]))));
+// سهم هر پسر از خانه‌ی شهر: ۳ میلیارد؛ از سهم مهدی (خریدار خانه) کم می‌شود؛ زمین‌های مهدی قابل خرید است
+st.house = { amount: '3000000000', receivers: [P[0].id, P[1].id, P[2].id], payer: P[3].id };
+st.adjust = {};
 st.log = [{ at: C.nowIso(), msg: 'فهرست پیش‌فرض زمین‌ها بارگذاری شد' }];
 fs.writeFileSync(path.join(__dirname, '..', 'js', 'seed.js'), '/* فهرست پیش‌فرض زمین‌ها (ساخته‌شده با tools/build-seed.js) */\nwindow.ZY_SEED = ' + JSON.stringify(st) + ';\n');
-const ev = C.evaluateScenario(st, sc);
-console.log('زمین:', st.parcels.length, ' ارزش کل:', ev.pool);
-ev.results.forEach(r => console.log(r.person.name, r.entitledPct + '٪', Math.round(r.entitledExact), 'خانه', r.houseAdj, 'اعتبار', r.credit));
-console.log('بدون خطا:', ev.errors.length === 0 ? 'بله' : ev.errors.join(' | '));
+const d = C.divisionLive(st);
+console.log('زمین:', st.parcels.length, ' ارزش کل:', d.total.n / d.total.d);
+d.people.forEach(x => console.log(x.person.name, 'حق', Math.round(Number(x.entitlement.n) / Number(x.entitlement.d)), 'اعتبار', Math.round(Number(x.credit.n) / Number(x.credit.d))));
+console.log('خطا:', d.errors.join(' | ') || 'ندارد', '| هشدار:', d.warns.join(' | ') || 'ندارد');

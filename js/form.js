@@ -99,7 +99,13 @@
         const sel = el('select', { id: 'f-estate' }, [el('option', { value: '', text: C.NO_ESTATE_NAME })].concat(list.map(e => el('option', { value: e.id, text: e.name }))));
         sel.value = p.estateId || '';
         sel.addEventListener('change', () => { p.estateId = sel.value || null; touch(); });
-        return el('div', null, [sel, el('div', { class: 'note', text: list.length ? 'سهم هر شخص از این دسته در تب «اشخاص و تقسیم» تعیین می‌شود.' : 'هنوز دسته‌ای نساخته‌اید؛ در تب «اشخاص و تقسیم» می‌توانید دسته‌هایی مثل «اموال پدری» یا «اموال دره‌گرمی» بسازید.' })]);
+        return el('div', null, [sel, el('div', { class: 'note', text: list.length ? 'سهم هر شخص از این دسته در تب «تقسیم» تعیین می‌شود.' : 'هنوز دسته‌ای نساخته‌اید؛ در تب «تقسیم» می‌توانید دسته‌هایی مثل «اموال پدری» یا «اموال دره‌گرمی» بسازید.' })]);
+      })()),
+      field('دست کی است؟ (برداشتن بعدی در تب «تقسیم» با قاعده‌ی خرید انجام می‌شود)', (() => {
+        const sel = el('select', { id: 'f-holder' }, [el('option', { value: '', text: '— آزاد (دست هیچ‌کس) —' })].concat((S().persons || []).map(x => el('option', { value: x.id, text: x.name }))));
+        sel.value = p.holderId || '';
+        sel.addEventListener('change', () => { p.holderId = sel.value || null; touch(); });
+        return sel;
       })()),
       el('div', { id: 'f-top', class: 'note' }),
     ]));

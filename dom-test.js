@@ -26,12 +26,11 @@ const loadErrors = [];
 w.addEventListener('error', (e) => loadErrors.push('window.error: ' + ((e.error && e.error.stack) || e.message)));
 const FILES = ['vendor/leaflet.js', 'vendor/proj4.js', 'vendor/xlsx.full.min.js', 'vendor/jszip.min.js',
   'core.js', 'detect.js', 'js/app.js', 'js/map.js', 'js/autodetect.js', 'js/split.js', 'js/importer.js',
-  'js/gps.js', 'js/form.js', 'js/parcels.js', 'js/settings.js', 'js/cases.js', 'js/people.js', 'js/project.js'];
+  'js/gps.js', 'js/form.js', 'js/parcels.js', 'js/settings.js', 'js/people.js', 'js/project.js'];
 FILES.forEach(f => { try { w.eval(read(f)); } catch (e) { loadErrors.push('بارگذاری ' + f + ': ' + e.message); } });
 let started = null;
 try { w.eval('App.start()'); } catch (e) { started = e.message; }
 const C = w.LandCore;
-try { w.localStorage.setItem('zy-adv', '1'); } catch (e) { /* ignore */ }
 
 /* مربع ۱۰۰×۱۰۰ متر در UTM39 (نزدیک اصفهان) به مختصات جغرافیایی */
 const proj4 = require('proj4');
@@ -135,276 +134,127 @@ t('برش: ثبت دو زمین جدید ⇒ دو زمین با مساحت و ا
   ok(!w.App.split.visible, 'پنل پس از ثبت بسته نشد');
 });
 
-/* ---------- تب اشخاص و تقسیم با کسر دقیق ---------- */
-t('تقسیم: سه نفر با سهم ۱/۳ در رابط ⇒ جمع ۱۰۰٪ و کنترل‌های سبز', () => {
-  w.eval('App.tab("people")');
+/* ---------- صفحه‌ی تقسیم (ساده) ---------- */
+const eq = (a, b, m) => { if (a !== b) throw new Error((m || '') + ' انتظار ' + b + ' ولی ' + a); };
+function setup() {
   const S = w.App.S;
-  ok(S.parcels.length >= 2, 'زمینی برای ساخت سناریو نیست');
-  ['عمو ۱', 'عمو ۲', 'عمو ۳'].forEach(n => C.addPerson(S, n, 1));
-  const sc = C.createScenario(S, 'تقسیم عموها');
-  w.eval('App.save()'); w.App.emit('state');
-  has(doc.getElementById('people-root').textContent, '۳۳٫۳۳۳۳٪', 'حق هر شخص از کل با کسر دقیق نمایش داده نشد');
-  // پیدا کردن سناریوی جاری و بازکردن آن
-  const openBtn = Array.from(doc.querySelectorAll('#people-root table.t tbody tr .btn')).find(b => /باز کردن/.test(b.textContent));
-  ok(openBtn, 'دکمه‌ی «باز کردن» سناریو پیدا نشد');
-  openBtn.dispatchEvent(new w.Event('click'));
-  const ids = S.persons.map(p => p.id);
-  Object.keys(sc.parcels).forEach(pid => C.setEqualAllocation(sc, pid, ids));   // همه‌ی زمین‌ها کامل واگذار شوند
-  w.eval('App.save()');
-  w.App.emit('state');
-  const html = doc.getElementById('people-root').innerHTML;
-  has(html, 'کنترل‌های محاسباتی', 'پنل کنترل‌ها نمایش داده نشد');
-  has(html, 'جمع سهم‌های همه‌ی زمین‌ها دقیقاً ۱۰۰٪ است');
-  ok(!/✘/.test(doc.getElementById('people-root').textContent), 'کنترلی رد شده است: ' + (doc.getElementById('people-root').textContent.match(/✘[^✔]{0,80}/g) || []).join(' | '));
-});
-t('تقسیم: ورود درصد در جدول (۱۲٫۵) ⇒ کسر دقیق ۱/۸ ذخیره می‌شود', () => {
-  const S = w.App.S, sc = S.scenarios[S.scenarios.length - 1], pid = Object.keys(sc.parcels)[0];
-  sc.allocations[pid] = [];
-  const inputs = Array.from(doc.querySelectorAll('#alloc-table tbody tr td input[dir=ltr]'));
-  ok(inputs.length >= 3, 'ورودی‌های سهم پیدا نشد');
-  inputs[0].value = '۱۲٫۵'; inputs[0].dispatchEvent(new w.Event('change'));
-  const a = (w.App.S.scenarios.slice(-1)[0].allocations[pid] || [])[0];
-  ok(a, 'سهمی ثبت نشد');
-  ok(a.num === '1' && a.den === '8', 'کسر دقیق ذخیره نشد: ' + JSON.stringify(a));
-  has(doc.getElementById('people-root').textContent, '۱۲٫۵٪', 'درصد دقیق در ستون جمع دیده نشد');
-});
-t('تقسیم: واگذاری بیش از ۱۰۰٪ ⇒ ستون جمع قرمز و کنترل رد می‌شود', () => {
-  const inputs = Array.from(doc.querySelectorAll('#alloc-table tbody tr td input[dir=ltr]'));
-  inputs[1].value = '1/2'; inputs[1].dispatchEvent(new w.Event('change'));
-  inputs[2].value = '75'; inputs[2].dispatchEvent(new w.Event('change'));
-  const body = doc.getElementById('people-root').textContent;
-  has(body, '۱۳۷٫۵٪', 'جمع دقیق ۱۳۷٫۵٪ نمایش داده نشد');
-  has(body, '✘', 'کنترل‌ها باید خطا بدهند');
-  has(body, 'بیش از ۱۰۰٪');
-  const ev = C.evaluateScenario(w.App.S, w.App.S.scenarios[w.App.S.scenarios.length - 1]);
-  ok(ev.errors.length > 0 && !ev.checks.find(c => c.id === 'no_over').ok);
-});
-t('تقسیم: دکمه‌ی «تقسیم برابر» سهم دقیق ۱/n می‌سازد و جمع همه‌ی ردیف‌ها ۱۰۰٪ می‌شود', () => {
-  const sc = w.App.S.scenarios[w.App.S.scenarios.length - 1];
-  const rows = Object.keys(sc.parcels).length;
-  ok(rows >= 2, 'سناریو باید حداقل دو زمین داشته باشد');
-  for (let i = 0; i < rows; i++) {
-    // جدول پس از هر کلیک دوباره ساخته می‌شود، پس هر بار ردیف i را تازه پیدا می‌کنیم
-    const tr = doc.querySelectorAll('#alloc-table tbody tr')[i];
-    ok(tr, 'ردیف ' + i + ' پیدا نشد');
-    const btn = Array.from(tr.querySelectorAll('.btn')).find(b => /تقسیم برابر/.test(b.textContent));
-    ok(btn, 'دکمه‌ی تقسیم برابر در ردیف ' + i + ' پیدا نشد');
-    btn.dispatchEvent(new w.Event('click'));
-  }
-  Object.keys(sc.parcels).forEach(pid => ok(C.fText(C.allocSum(sc, pid)) === '1', 'جمع سهم‌های ' + pid + ' یک نشد: ' + C.fText(C.allocSum(sc, pid))));
-  const ev = C.evaluateScenario(w.App.S, sc);
-  ev.results.forEach(r => ok(r.diff === 0, 'اختلاف ' + r.person.name + ' صفر نیست: ' + r.diff));
-  const body = doc.getElementById('people-root').textContent;
-  ok(body.indexOf('جمع سهم‌های همه‌ی زمین‌ها دقیقاً ۱۰۰٪ است') >= 0, 'کنترل جمع سبز نشد');
-  ok(!/✘/.test(body), 'کنترلی رد شده است: ' + (body.match(/✘[^\n]{0,90}/g) || []).join(' | '));
-});
-t('نسخه‌ی وب: ذخیره‌ی خودکار در مرورگر و فایل پروژه کار می‌کند', () => {
-  w.eval('App.save()');
-  const raw = w.localStorage.getItem('zamin-yar-state-v1');
-  ok(raw && JSON.parse(raw).parcels.length === w.App.S.parcels.length, 'ذخیره‌ی خودکار ناموفق');
-  const s2 = JSON.parse(JSON.stringify(w.App.S));      // simulate file round-trip
-  ok(s2.scenarios[s2.scenarios.length - 1].allocations, 'سهم‌ها در فایل پروژه نیست');
-  const a = s2.scenarios[s2.scenarios.length - 1].allocations[Object.keys(s2.scenarios[s2.scenarios.length - 1].allocations)[0]][0];
-  ok(a.num && a.den, 'کسر دقیق در فایل پروژه ذخیره نشده است');
-});
-
-/* ---------- دسته‌های اموال، مبنای قیمت و برگه‌ی نهایی ---------- */
-t('دسته‌ها: ساخت دو دسته در رابط و ثبت سهم متفاوت (۴/۳) برای یک شخص', () => {
-  w.eval('App.tab("people")');
-  const S = w.App.S;
-  const add = () => {
-    const card = Array.from(doc.querySelectorAll('#people-root .card')).find(c => /دسته‌های اموال/.test(c.textContent));
-    ok(card, 'کارت دسته‌های اموال پیدا نشد');
-    return card;
-  };
-  let card = add();
-  const inp = card.querySelector('input[type=text]');
-  const btn = Array.from(card.querySelectorAll('.btn')).find(b => /افزودن دسته/.test(b.textContent));
-  inp.value = 'اموال پدری'; btn.dispatchEvent(new w.Event('click'));
-  card = add();
-  const inp2 = card.querySelector('input[type=text]');
-  const btn2 = Array.from(card.querySelectorAll('.btn')).find(b => /افزودن دسته/.test(b.textContent));
-  inp2.value = 'اموال دره‌گرمی'; btn2.dispatchEvent(new w.Event('click'));
-  ok(S.estates.length === 2, 'دو دسته ساخته نشد: ' + S.estates.length);
-  has(doc.getElementById('people-root').textContent, 'سهم هر شخص در هر دسته', 'ماتریس سهم‌ها نمایش داده نشد');
-  // سهم نفر اول در دسته‌ی دوم: ۴/۳ (یک‌سوم بیشتر)
-  const mx = Array.from(doc.querySelectorAll('#people-root table.mx tbody tr'))[0];
-  const cells = mx.querySelectorAll('input[dir=ltr]');
-  ok(cells.length === 2, 'برای هر دسته یک خانه لازم است: ' + cells.length);
-  cells[1].value = '4/3'; cells[1].dispatchEvent(new w.Event('change'));
-  const e2 = w.App.S.estates[1];
-  ok(C.fText(C.estateWeightFrac(e2, w.App.S.persons[0].id)) === '4/3', 'سهم ۴/۳ ثبت نشد');
-  // بقیه ۱ ⇒ جمع = ۴/۳ + ۱ + ۱ = ۱۰/۳
-  ok(C.fText(C.estateWeights(w.App.S, e2.id).sum) === '10/3', 'جمع سهم‌های دسته درست نیست');
-});
-t('دسته‌ها: دکمه‌ی «سهم مضاعف» ⇒ یک‌سوم بیشتر برای نفرهای انتخاب‌شده', () => {
-  const S = w.App.S;
-  const btn = Array.from(doc.querySelectorAll('#people-root .btn')).filter(b => /سهم مضاعف/.test(b.textContent))[1];
-  ok(btn, 'دکمه‌ی سهم مضاعف پیدا نشد');
-  btn.dispatchEvent(new w.Event('click'));
-  const cbs = Array.from(doc.querySelectorAll('#modal-root input[type=checkbox]'));
-  ok(cbs.length === S.persons.length, 'فهرست اشخاص در پنجره نیست');
-  cbs[0].checked = true; cbs[0].dispatchEvent(new w.Event('change'));
-  const apply = Array.from(doc.querySelectorAll('#modal-root .mf .btn')).find(b => /اعمال/.test(b.textContent));
-  apply.dispatchEvent(new w.Event('click'));
-  const e2 = w.App.S.estates[1];
-  const ws = w.App.S.persons.map(p => C.fText(C.estateWeightFrac(e2, p.id)));
-  ok(ws[0] === '5/3' || ws[0] === '4/3', 'سهم نفر اول بیشتر نشد: ' + ws.join(','));
-  ok(ws.slice(1).every(x => x === '1'), 'سهم بقیه نباید تغییر کند: ' + ws.join(','));
-});
-t('دسته‌ها: دو منبع با هم ⇒ حق هرکس جمع سهمش در دو دسته و بستانکاری/بدهکاری ترازند', () => {
-  const S = w.App.S;
-  const ids = Object.keys(S.parcels.reduce((o, p) => (o[p.id] = 1, o), {}));
-  ok(S.parcels.length >= 2 && S.estates.length === 2, 'پیش‌نیاز آماده نیست');
-  C.setParcelEstate(S, S.parcels[0].id, S.estates[0].id, true);
-  S.parcels.slice(1).forEach(p => C.setParcelEstate(S, p.id, S.estates[1].id, true));
-  const sc = C.createScenario(S, 'دو منبع با هم');
-  Object.keys(sc.parcels).forEach(pid => C.setEqualAllocation(sc, pid, S.persons.map(p => p.id)));
-  w.eval('App.save()'); w.App.emit('state');
-  const openBtn = Array.from(doc.querySelectorAll('#people-root table.t tbody tr')).filter(tr => /دو منبع با هم/.test(tr.textContent)).map(tr => Array.from(tr.querySelectorAll('.btn')).find(b => /باز کردن/.test(b.textContent)))[0];
-  ok(openBtn, 'دکمه‌ی بازکردن سناریوی تازه پیدا نشد');
-  openBtn.dispatchEvent(new w.Event('click'));
-  const body = doc.getElementById('people-root').textContent;
-  has(body, 'سطح قیمت‌های مرجع', 'نوار مبنای قیمت دیده نشد');
-  has(body, 'دسته‌های اموال در این محاسبه', 'انتخاب دسته‌ها دیده نشد');
-  has(body, 'بستانکار');
-  const ev = C.evaluateScenario(S, sc);
-  ok(ev.estates.length === 2, 'دو دسته در محاسبه نیست: ' + ev.estates.length);
-  const sumC = ev.results.reduce((s, r) => s + r.credit, 0), sumD = ev.results.reduce((s, r) => s + r.debit, 0);
-  ok(sumC === sumD, 'جمع بستانکاری و بدهکاری برابر نیست: ' + sumC + ' / ' + sumD);
-  ok(ev.results.reduce((s, r) => s + r.entitled, 0) === ev.pool, 'جمع حق‌ها با ارزش کل برابر نیست');
-  ok(ids.length >= 2);
-});
-t('مبنای قیمت: تغییر منبع و ضریب در رابط ⇒ ارزش کل و حق اشخاص بلافاصله دوباره حساب می‌شود', () => {
-  const S = w.App.S, sc = S.scenarios[S.scenarios.length - 1];
-  const before = C.evaluateScenario(S, sc).pool;
-  const sels = Array.from(doc.querySelectorAll('#people-root .basis select'));
-  ok(sels.length >= 3, 'انتخابگرهای مبنای قیمت پیدا نشد: ' + sels.length);
-  sels[0].value = 'live'; sels[0].dispatchEvent(new w.Event('change'));
-  ok(C.normBasis(w.App.S.scenarios[w.App.S.scenarios.length - 1].priceBasis).mode === 'live', 'منبع قیمت عوض نشد');
-  const fac = doc.querySelector('#people-root .basis input[dir=ltr]');
-  ok(fac, 'کادر ضریب پیدا نشد');
-  fac.value = '2'; fac.dispatchEvent(new w.Event('change'));
-  const sc2 = w.App.S.scenarios[w.App.S.scenarios.length - 1];
-  const ev = C.evaluateScenario(w.App.S, sc2);
-  near(ev.pool, before * 2, Math.max(2, before * 0.0001), 'ارزش کل با ضریب ۲ دو برابر نشد');
-  ok(ev.results.every(r => r.entitled > 0), 'حق اشخاص محاسبه نشد');
-  has(doc.getElementById('people-root').textContent, 'ارزش کل با این مبنا', 'خلاصه‌ی مبنای قیمت دیده نشد');
-  // برگشت به عکس سناریو
-  const sels2 = Array.from(doc.querySelectorAll('#people-root .basis select'));
-  sels2[0].value = 'snapshot'; sels2[0].dispatchEvent(new w.Event('change'));
-  near(C.evaluateScenario(w.App.S, w.App.S.scenarios[w.App.S.scenarios.length - 1]).pool, before, 2, 'برگشت به قیمت‌های سناریو انجام نشد');
-});
-t('برگه‌ی نهایی: برای هر شخص فهرست زمین‌ها، جمع کل و بستانکاری/بدهکاری دارد', () => {
-  const btn = Array.from(doc.querySelectorAll('#people-root .btn')).find(b => /برگه‌ی نهایی تقسیم/.test(b.textContent));
-  ok(btn, 'دکمه‌ی برگه‌ی نهایی پیدا نشد');
-  btn.dispatchEvent(new w.Event('click'));
-  const sheet = doc.querySelector('#modal-root .sheet');
-  ok(sheet, 'برگه ساخته نشد');
-  const txt = sheet.textContent;
-  has(txt, 'برگه‌ی نهایی تقسیم');
-  has(txt, 'هر زمین به چه کسی رسید');
-  has(txt, 'خلاصه‌ی تسویه');
-  ok(sheet.querySelectorAll('.person').length === w.App.S.persons.length, 'برای هر شخص یک برگه لازم است');
-  ok(doc.getElementById('print-root'), 'جای چاپ در صفحه نیست');
-  const html = w.App.sheetDoc('آزمون', sheet.innerHTML);
-  ok(/^<!doctype html>/i.test(html) && /dir="rtl"/.test(html), 'سند چاپی کامل نیست');
-});
-
-t('پرونده‌ی زنده: ساخت، بخش‌ها، واگذاری، معامله، کسری و تغییر قیمت در رابط', () => {
-  const S = w.App.S;
-  S.parcels.length = 0;
-  const mk = (name, total, area) => { const id = 'LC' + S.parcels.length; S.parcels.push({ id, name, notes: name.indexOf('دره') >= 0 ? 'دره گرمی' : '', scope: 'rural_inside', attrs: {}, grade: 'grade1', special: false, valuation: { area, pricePerM2: Math.round(total / area), total, status: 'ok' } }); return id; };
-  const a = mk('دره الف', 1000000000, 1000), b = mk('پدری ب', 3000000000, 3000);
-  S.persons.length = 0; S.scenarios.length = 0;
-  const P1 = C.addPerson(S, 'علی', 1), P2 = C.addPerson(S, 'بابک', 1);
-  w.App.save(); w.eval('App.tab("people")'); w.eval('App.tab("map")'); w.eval('App.tab("people")');
-  const root = doc.getElementById('people-root');
-  const click = (n) => n.dispatchEvent(new w.Event('click'));
-  click(doc.getElementById('case-new'));
-  const sc = S.scenarios.find(x => x.live); ok(sc, 'پرونده ساخته نشد');
-  // تیک زمین‌ها
-  const cbs = Array.from(doc.querySelectorAll('#case-view input[type=checkbox]'));
-  ok(cbs.length >= 4, 'چک‌باکس‌ها پیدا نشد');
-  cbs.forEach(cb => { if (!cb.checked) { cb.checked = true; cb.dispatchEvent(new w.Event('change')); } });
-  ok(sc.parcelIds.indexOf(a) >= 0 && sc.parcelIds.indexOf(b) >= 0, 'زمین‌ها انتخاب نشد');
-  ok(sc.personIds.length === 2, 'اشخاص انتخاب نشد');
-  // بخش دره‌گرمی با عبارت
-  click(doc.querySelector('[data-ct=sections]'));
-  const ph = Array.from(doc.querySelectorAll('#case-view input[type=text]')).find(i => /عبارت/.test(i.placeholder));
-  ph.value = 'دره گرمی';
-  click(Array.from(doc.querySelectorAll('#case-view button')).find(b2 => /ساخت بخش با عبارت/.test(b2.textContent)));
-  ok(sc.sections.length === 2 && sc.sections[1].parcelIds.indexOf(a) >= 0, 'بخش با عبارت ساخته نشد');
-  C.setSectionWeight(sc, sc.sections[1].id, P1.id, '3'); C.setSectionWeight(sc, sc.sections[1].id, P2.id, '1');
-  // واگذاری: همه‌ی زمین‌ها به علی
-  C.setAllocation(sc, a, P1.id, 1); C.setAllocation(sc, b, P1.id, 1);
-  let ev = C.evaluateScenario(S, sc);
-  const r1 = ev.results.find(r => r.person.id === P1.id), r2 = ev.results.find(r => r.person.id === P2.id);
-  near(r2.short, 1750000000, 1, 'کسری بابک');
-  // پنل حساب هر نفر در مرحله‌ی واگذاری: تعدیل +/− و مانده‌ی اعتبار زنده
-  click(doc.querySelector('[data-ct=alloc]'));
-  ok(doc.getElementById('credit-table'), 'پنل حساب هر نفر نیست');
-  const rowB = doc.querySelector('#credit-table [data-pid="' + P2.id + '"]');
-  const adjIn = rowB.querySelector('input'); adjIn.value = '+500000000'; adjIn.dispatchEvent(new w.Event('change'));
-  ok(sc.adjust && sc.adjust[P2.id] === '+500000000', 'تعدیل ثبت نشد');
-  const rowB2 = doc.querySelector('#credit-table [data-pid="' + P2.id + '"]');
-  ok(/۲٬۲۵۰٬۰۰۰٬۰۰۰/.test(rowB2.textContent), 'مانده‌ی اعتبار بابک ۲٬۲۵۰٬۰۰۰٬۰۰۰ نیست: ' + rowB2.textContent.slice(0, 200));
-  // معامله‌ی نقدی از علی به بابک
-  click(doc.querySelector('[data-ct=deals]'));
-  const sels = doc.querySelectorAll('#case-view select');
-  sels[0].value = 'cash'; sels[0].dispatchEvent(new w.Event('change'));
-  const amt = Array.from(doc.querySelectorAll('#case-view input[type=text]')).find(i => /مبلغ/.test(i.placeholder)); amt.value = '1000000000';
-  click(doc.getElementById('deal-add'));
-  ok(sc.deals.length === 1, 'معامله ثبت نشد');
-  click(doc.querySelector('[data-ct=result]'));
-  ok(/لیست نهایی/.test(root.textContent) && /کسری/.test(root.textContent), 'نتیجه نمایش داده نشد');
-  // تغییر قیمت یک زمین ⇒ نتیجه تازه می‌شود
-  S.parcels.find(p => p.id === b).valuation.total = 5000000000; w.App.save();
-  ev = C.evaluateScenario(S, sc);
-  near(ev.pool, 6000000000, 1, 'جمع زنده');
-  ok(!/\[object/.test(root.textContent), 'متن نامعتبر در صفحه');
-  ok(w.App.cases.textOf(sc, ev).indexOf('علی') >= 0, 'متن خروجی');
-});
-
-
-
-t('صفحه‌ی ساده: جدول سهم، خانه‌ی شهر، انتخاب زمین با یک انتخاب، مانده‌ی زنده و کد ارسال/دریافت', () => {
-  const S = w.App.S;
-  w.localStorage.setItem('zy-adv', '0');
-  S.parcels.length = 0; S.persons.length = 0; S.scenarios.length = 0; S.estates = [];
-  const mk = (name, total, area, est) => { const id = 'SP' + S.parcels.length; S.parcels.push({ id, name, notes: '', estateId: est, scope: 'rural_inside', attrs: {}, grade: 'grade1', special: false, valuation: { area, pricePerM2: Math.round(total / area), total, status: 'قطعی' } }); return id; };
+  S.parcels.length = 0; S.persons.length = 0; S.scenarios.length = 0; S.estates = []; S.house = { amount: '', receivers: [], payer: '' }; S.adjust = {};
+  const mk = (name, total, area, est) => { const id = 'SP' + S.parcels.length; S.parcels.push({ id, name, notes: '', estateId: est, holderId: null, scope: 'rural_inside', attrs: {}, grade: 'grade1', special: false, valuation: { area, pricePerM2: Math.round(total / area), total, status: 'قطعی' } }); return id; };
   const E1 = C.addEstate(S, 'دره گرمی'), E2 = C.addEstate(S, 'پدری');
-  const a = mk('دره الف', 2100000000, 1000, E1.id), b = mk('پدری ب', 7000000000, 3000, E2.id);
+  const a = mk('دره الف', 2100000000, 1000, E1.id), b = mk('پدری ب', 7000000000, 3000, E2.id), c2 = mk('پدری ج', 1000000000, 500, E2.id);
   const M = C.addPerson(S, 'مصطفی', 1), E = C.addPerson(S, 'اسفندیار', 1), A = C.addPerson(S, 'امیر', 1), H = C.addPerson(S, 'مهدی', 1);
   [[8, 8, 1, 4], [1, 1, 1, 4]].forEach((ws, i) => [M, E, A, H].forEach((p, j) => C.setEstateWeight(S, i === 0 ? E1.id : E2.id, p.id, String(ws[j]))));
-  const sc = C.createCase(S, 'آزمون', null, null); C.sectionsFromEstates(S, sc);
-  sc.house = { amount: '3000000000', receivers: [M.id, E.id, A.id], payer: H.id };
+  S.house = { amount: '3000000000', receivers: [M.id, E.id, A.id], payer: H.id };
+  S.parcels.find(p => p.id === b).holderId = H.id;        // «پدری ب» دست مهدی
+  S.parcels.find(p => p.id === c2).holderId = M.id;       // «پدری ج» دست مصطفی
   w.App.save(); w.eval('App.tab("map")'); w.eval('App.tab("people")');
-  ok(doc.getElementById('sum-table'), 'جدول سهم‌ها نیست');
-  const txt0 = doc.getElementById('sum-table').textContent;
-  ok(/خانه‌ی شهر/.test(txt0) && /جمع کل/.test(txt0) && /۸٬۰۰۰٬۰۰۰٬۰۰۰|۳٬۰۰۰٬۰۰۰٬۰۰۰/.test(txt0), 'ردیف‌های جدول: ' + txt0.slice(0, 200));
-  let ev = C.evaluateScenario(S, sc);
-  near(ev.results.reduce((s2, r) => s2 + r.credit, 0), 9100000000, 2, 'جمع اعتبار = ارزش کل');
-  // انتخاب: «پدری ب» برای امیر
-  const rows = Array.from(doc.querySelectorAll('#pick-box select'));
-  const selB = rows[2]; selB.value = A.id; selB.dispatchEvent(new w.Event('change'));
-  ok(sc.allocations[b] && sc.allocations[b][0].personId === A.id, 'انتخاب ثبت نشد ' + rows.length + ' ' + JSON.stringify(sc.allocations) + ' ' + selB.value + ' ' + Array.from(selB.options).map(o => o.value).join(','));
-  const strip = doc.getElementById('strip-box').textContent;
-  ev = C.evaluateScenario(S, sc);
-  const rA = ev.results.find(r => r.person.id === A.id);
-  near(rA.remaining, rA.credit - 7000000000, 1, 'مانده‌ی امیر');
-  ok(strip.indexOf('امیر') >= 0, 'نوار مانده');
-  // کد ارسال: ساخت و اعمال روی «نسخه‌ی اصلی»
-  doc.querySelector('#code-box select').value = A.id;
-  doc.getElementById('code-make').dispatchEvent(new w.Event('click'));
-  const code = doc.querySelector('#code-box textarea').value;
-  ok(/^ZY1:/.test(code), 'کد ساخته نشد');
-  delete sc.allocations[b];                                // مادر هنوز چیزی از امیر ندارد
-  doc.getElementById('code-in').value = '  ' + code + '  ';
-  doc.getElementById('code-apply').dispatchEvent(new w.Event('click'));
-  ok(sc.allocations[b] && sc.allocations[b][0].personId === A.id, 'کد اعمال نشد');
-  ok(sc.received && sc.received[A.id] && sc.received[A.id].n === 1, 'ثبت دریافت');
-  w.localStorage.setItem('zy-adv', '1');
+  return { S, E1, E2, a, b, c2, M, E, A, H };
+}
+const click = (e) => e.dispatchEvent(new w.Event('click', { bubbles: true }));
+const change = (e, v) => { if (v !== undefined) e.value = v; e.dispatchEvent(new w.Event('change', { bubbles: true })); };
+const N = (f) => Number(f.n) / Number(f.d);
+
+t('صفحه‌ی تقسیم: دسته‌ها با ارزش و ضریب، حساب هر نفر با خانه‌ی شهر، بدون هیچ سناریو', () => {
+  const x = setup();
+  ok(!/سناریو|اشخاص و تقسیم/.test(doc.getElementById('people-root').textContent), 'اثری از سناریو مانده است');
+  const root = doc.getElementById('people-root').textContent;
+  ok(doc.getElementById('cat-table'), 'جدول دسته‌ها نیست');
+  has(root, 'دره گرمی'); has(root, 'پدری'); has(root, '۲٬۱۰۰٬۰۰۰٬۰۰۰'); has(root, '۸٬۰۰۰٬۰۰۰٬۰۰۰', 'ارزش دسته‌ی پدری');
+  const card = doc.querySelector('#sum-table .pcard[data-pid="' + x.M.id + '"]');
+  ok(card, 'کارت مصطفی نیست');
+  has(card.textContent, 'خانه‌ی شهر'); has(card.textContent, '+۳٬۰۰۰٬۰۰۰٬۰۰۰');
+  const d = C.divisionLive(x.S), m = d.people[0];
+  near(N(m.credit), 2100000000 * 8 / 21 + 8000000000 / 7 + 3e9, 1e-6);
+  // مانده‌ی مصطفی = اعتبار − «پدری ج» (۱ میلیارد) که دستش است
+  near(N(m.remaining), N(m.credit) - 1e9, 1e-6);
+  ok(doc.getElementById('strip-box').textContent.indexOf('مصطفی') >= 0, 'نوار مانده');
+});
+
+t('صفحه‌ی تقسیم: تغییر ضریب یک دسته در جدول ⇒ همه‌ی عددها فوراً دوباره حساب می‌شود', () => {
+  const x = setup();
+  const inp = doc.querySelector('#cat-table input.w[data-est="' + x.E2.id + '"][data-pid="' + x.A.id + '"]');
+  ok(inp, 'ورودی ضریب نیست'); change(inp, '2');
+  const d = C.divisionLive(w.App.S);
+  near(N(d.people[2].parts[1].share), 2 / 8, 1e-12, 'سهم امیر از پدری باید ۲/۸ شود');
+  has(doc.getElementById('people-root').textContent, '۱/۴', 'سهم جدید در صفحه نیامد');
+});
+
+t('صفحه‌ی تقسیم: جابه‌جایی زمین بین دو دسته در لیست ⇒ حق‌ها بلافاصله عوض می‌شود', () => {
+  const x = setup();
+  const before = N(C.divisionLive(x.S).people[0].entitlement);
+  const row = doc.querySelector('#pick-list .prow[data-pid="' + x.a + '"]');
+  change(row.querySelector('.est-sel'), x.E2.id);
+  const after = N(C.divisionLive(x.S).people[0].entitlement);
+  ok(Math.abs(after - before) > 1000, 'حق عوض نشد');
+  near(after, 10100000000 / 7, 1e-6);
+  // ارزش دسته‌ها در صفحه عوض شد
+  has(doc.getElementById('cat-table').textContent, '۱۰٬۱۰۰٬۰۰۰٬۰۰۰');
+});
+
+t('صفحه‌ی تقسیم: برداشتن زمین فقط از مهدی/آزاد؛ زمین مصطفی برای دیگران بسته است تا آزاد شود', () => {
+  const x = setup();
+  const rowB = doc.querySelector('#pick-list .prow[data-pid="' + x.b + '"]'), rowC = doc.querySelector('#pick-list .prow[data-pid="' + x.c2 + '"]');
+  // «پدری ب» دست مهدی است ⇒ امیر می‌تواند بردارد
+  change(rowB.querySelector('.hold-sel'), x.A.id);
+  eq(w.App.S.parcels.find(p => p.id === x.b).holderId, x.A.id);
+  const rem = N(C.divisionLive(w.App.S).people[2].remaining);
+  const A = C.divisionLive(w.App.S).people[2];
+  near(rem, N(A.credit) - 7e9, 1e-6);
+  ok(/کسری/.test(doc.querySelector('#strip-box .chip[data-pid="' + x.A.id + '"]').textContent) === (rem < 0), 'نوار کسری/مانده');
+  // «پدری ج» دست مصطفی است ⇒ اسفندیار نمی‌تواند (گزینه غیرفعال و تغییر زور هم رد می‌شود)
+  const opt = Array.from(rowC.querySelectorAll('.hold-sel option')).find(o => o.value === x.E.id);
+  ok(opt && opt.disabled, 'گزینه‌ی غیرمجاز غیرفعال نیست');
+  change(rowC.querySelector('.hold-sel'), x.E.id);
+  eq(w.App.S.parcels.find(p => p.id === x.c2).holderId, x.M.id);
+  // مصطفی آزادش می‌کند ⇒ اسفندیار می‌تواند بردارد
+  change(rowC.querySelector('.hold-sel'), '');
+  eq(w.App.S.parcels.find(p => p.id === x.c2).holderId, null);
+  change(rowC.querySelector('.hold-sel'), x.E.id);
+  eq(w.App.S.parcels.find(p => p.id === x.c2).holderId, x.E.id);
+  // لیست نهایی زمین‌های هر نفر
+  has(doc.getElementById('res-box').textContent, 'پدری ب'); has(doc.getElementById('res-box').textContent, 'پدری ج');
+});
+
+t('صفحه‌ی تقسیم: «سایر (+/−)» و دسته‌ی تازه با سهم‌بندی مثل پدری', () => {
+  const x = setup();
+  const adj = doc.querySelector('#sum-table input.adj[data-pid="' + x.A.id + '"]');
+  change(adj, '+2 میلیارد');
+  near(N(C.divisionLive(x.S).people[2].adjust), 2e9, 1e-6);
+  has(doc.getElementById('house-box').textContent, 'صفر نیست');
+  doc.getElementById('cat-new').value = 'محدوده سد'; click(doc.getElementById('cat-add'));
+  const e3 = w.App.S.estates.find(e => e.name === 'محدوده سد');
+  ok(e3, 'دسته ساخته نشد');
+  eq(JSON.stringify(e3.weights), JSON.stringify(x.S.estates.find(e => e.name === 'پدری').weights));
+  // یک زمین به دسته‌ی تازه می‌رود و در حق‌ها اثر می‌کند
+  const row = doc.querySelector('#pick-list .prow[data-pid="' + x.a + '"]');
+  change(row.querySelector('.est-sel'), e3.id);
+  near(N(C.divisionLive(x.S).cats.find(c => c.name === 'محدوده سد').value), 2100000000, 1e-6);
+});
+
+t('صفحه‌ی تقسیم: کد انتخاب شریک ⇒ نسخه‌ی اصلی زمین‌هایش را ثبت می‌کند', () => {
+  const x = setup();
+  change(doc.querySelector('#pick-list .prow[data-pid="' + x.b + '"] .hold-sel'), x.A.id);
+  doc.getElementById('code-who').value = x.A.id;
+  click(doc.getElementById('code-make'));
+  const code = doc.getElementById('code-out').value;
+  ok(/^ZY2:/.test(code), 'کد ساخته نشد');
+  w.App.S.parcels.find(p => p.id === x.b).holderId = x.H.id;       // نسخه‌ی مادر هنوز نمی‌داند
+  doc.getElementById('code-in').value = ' ' + code + ' ';
+  click(doc.getElementById('code-apply'));
+  eq(w.App.S.parcels.find(p => p.id === x.b).holderId, x.A.id);
+  ok(w.App.S.received && w.App.S.received[x.A.id] && w.App.S.received[x.A.id].n === 1, 'ثبت دریافت');
+});
+
+t('نسخه‌ی وب: ذخیره‌ی خودکار در مرورگر ثبت دسته و «دست کی» را نگه می‌دارد', () => {
+  setup(); w.eval('App.save()');
+  const raw = JSON.parse(w.localStorage.getItem('zamin-yar-state-v1'));
+  ok(raw.parcels.some(p => p.holderId) && raw.house && raw.house.payer, 'دست کی/خانه ذخیره نشد');
+});
+
+t('فرم ثبت زمین: گزینه‌ی «دست کی است؟» کنار دسته هست', () => {
+  setup(); w.eval('App.tab("map")');
+  ok(doc.getElementById('f-holder'), 'گزینه‌ی دست کی در فرم نیست');
+  ok(doc.getElementById('f-estate'), 'دسته در فرم نیست');
 });
 
 console.log(out.join('\n'));

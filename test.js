@@ -933,27 +933,77 @@ t('تعدیل جمع و تفریقی: +/− روی حق هر نفر؛ مانده
   eq(C.fText(C.parseAdjust('')), '0'); ok(C.parseAdjust('+-5') === null);
 });
 
-t('فهرست پیش‌فرض (js/seed.js): ۴۹ زمین با ارزش دقیق، پرونده‌ی آماده و حق هر نفر', () => {
+t('فهرست پیش‌فرض (js/seed.js): ۴۹ زمین، سه دسته، حق هر نفر و خانه‌ی شهر — همه زنده', () => {
   const w = {}; new Function('window', require('fs').readFileSync(__dirname + '/js/seed.js', 'utf8'))(w);
   const st = w.ZY_SEED;
-  eq(st.parcels.length, 49); eq(st.persons.length, 4);
+  eq(st.parcels.length, 49); eq(st.persons.length, 4); eq(st.estates.length, 3);
   eq(st.parcels.reduce((a, p) => a + p.valuation.total, 0), 39965478179);
   ok(st.parcels.every(p => p.valuation.status === 'قطعی'), 'وضعیت همه‌ی زمین‌ها قطعی نیست');
-  const sc = st.scenarios.find(x => x.live); ok(sc && sc.sections.length === 2, 'پرونده‌ی آماده');
-  const ev = C.evaluateScenario(st, sc);
-  ok(ev.errors.length === 0, ev.errors.join('|'));
-  const dg = ev.sections.find(x => /دره/.test(x.name)).poolExact, pd = ev.pool - dg;
-  const M = ev.results.find(r => r.person.name === 'مصطفی'), A = ev.results.find(r => r.person.name === 'امیر'), H = ev.results.find(r => /مهدی/.test(r.person.name));
-  near(M.entitledExact, dg * 8 / 21 + pd / 7, 0.01); near(A.entitledExact, dg / 21 + pd / 7, 0.01); near(H.entitledExact, dg * 4 / 21 + pd * 4 / 7, 0.01);
-  near(ev.results.reduce((a, r) => a + r.entitledExact, 0), ev.pool, 0.01);
-  // خانه‌ی شهر: هر پسر +۳ میلیارد، مهدی −۹ میلیارد؛ جمع اعتبارها = ارزش کل
-  eq(M.houseAdj, 3000000000); eq(H.houseAdj, -9000000000);
-  near(M.creditExact, M.entitledExact + 3e9, 0.01); near(H.creditExact, H.entitledExact - 9e9, 0.01);
-  near(ev.results.reduce((a, r) => a + r.creditExact, 0), ev.pool, 0.01);
-  ok(!ev.checks.some(k => k.id === 'adjust_balance'), 'جمع تعدیل‌ها صفر نیست');
-  // «سایر» روی امیر: +۵۰۰ میلیون ⇒ جمع تعدیل‌ها صفر نیست و هشدار می‌دهد
-  sc.adjust = { [A.person.id]: '+500000000' };
-  ok(C.evaluateScenario(st, sc).checks.some(k => k.id === 'adjust_balance' && !k.ok));
+  eq(st.estates[2].name, 'محدوده سد');
+  const d = C.divisionLive(st);
+  ok(d.errors.length === 0, d.errors.join('|'));
+  const V = (n) => { const c = d.cats.find(x => x.name === n); return Number(c.value.n) / Number(c.value.d); };
+  const dg = V('دره گرمی'), pd = V('پدری'), N = (f) => Number(f.n) / Number(f.d);
+  const M = d.people.find(r => r.person.name === 'مصطفی'), A = d.people.find(r => r.person.name === 'امیر'), H = d.people.find(r => /مهدی/.test(r.person.name));
+  near(N(M.entitlement), dg * 8 / 21 + pd / 7, 0.01); near(N(A.entitlement), dg / 21 + pd / 7, 0.01); near(N(H.entitlement), dg * 4 / 21 + pd * 4 / 7, 0.01);
+  near(d.people.reduce((a, r) => a + N(r.entitlement), 0), dg + pd, 0.01);
+  eq(N(M.house), 3000000000); eq(N(H.house), -9000000000);
+  near(N(M.credit), N(M.entitlement) + 3e9, 0.01); near(N(H.credit), N(H.entitlement) - 9e9, 0.01);
+  near(d.people.reduce((a, r) => a + N(r.credit), 0), dg + pd, 0.01);
+  eq(d.people.every(r => r.held.length === 0), true);       // هنوز کسی چیزی برنداشته
+  eq(d.free.length, 49);
+});
+
+t('تقسیم زنده: جابه‌جایی زمین بین دسته‌ها فوراً حق‌ها را عوض می‌کند (بدون هیچ فهرست حفظ‌شده)', () => {
+  const st = C.newState();
+  const E1 = C.addEstate(st, 'دره گرمی'), E2 = C.addEstate(st, 'پدری');
+  const mk = (n, total, est) => { const p = C.newParcel({ name: n, estateId: est.id }); p.valuation = { total, area: 100, status: 'قطعی' }; st.parcels.push(p); return p; };
+  const a = mk('الف', 2100000000, E1), b = mk('ب', 7000000000, E2);
+  const P = ['م', 'ا', 'ام', 'مه'].map(n => C.addPerson(st, n, 1));
+  [[8, 8, 1, 4], [1, 1, 1, 4]].forEach((ws, i) => P.forEach((p, j) => C.setEstateWeight(st, [E1, E2][i].id, p.id, String(ws[j]))));
+  const N = (f) => Number(f.n) / Number(f.d);
+  let d = C.divisionLive(st);
+  near(N(d.people[0].entitlement), 2100000000 * 8 / 21 + 7000000000 / 7, 1e-6);
+  a.estateId = E2.id;                                         // «الف» از دره گرمی به پدری می‌رود
+  d = C.divisionLive(st);
+  near(N(d.people[0].entitlement), 9100000000 / 7, 1e-6, 'حق مصطفی باید فقط از پدری باشد');
+  near(N(d.people[3].entitlement), 9100000000 * 4 / 7, 1e-6);
+  a.estateId = null;                                          // بدون دسته ⇒ در هیچ سهمی نیست و هشدار می‌دهد
+  d = C.divisionLive(st);
+  ok(d.warns.some(x => /دسته‌بندی‌نشده/.test(x)));
+  near(N(d.people.reduce((s2, r) => C.fAdd(s2, r.entitlement), C.frac(0))), 7000000000, 1e-6);
+});
+
+t('تقسیم زنده: قاعده‌ی خرید — فقط زمین مهدی (خریدار خانه) یا زمین آزاد؛ جمع و تفریق دقیق', () => {
+  const st = C.newState();
+  const E1 = C.addEstate(st, 'پدری');
+  const mk = (n, total) => { const p = C.newParcel({ name: n, estateId: E1.id }); p.valuation = { total, area: 10, status: 'قطعی' }; st.parcels.push(p); return p; };
+  const p1 = mk('p1', 3000000000), p2 = mk('p2', 2000000000), p3 = mk('p3', 5000000000);
+  const [M, E, A, H] = ['م', 'ا', 'ام', 'مه'].map(n => C.addPerson(st, n, 1));
+  [1, 1, 1, 4].forEach((w, j) => C.setEstateWeight(st, E1.id, [M, E, A, H][j].id, String(w)));
+  st.house = { amount: '3 میلیارد', receivers: [M.id, E.id, A.id], payer: H.id };
+  C.setHolder(st, p1.id, M.id, true); C.setHolder(st, p2.id, H.id, true);   // ثبت اولیه: p1 دست مصطفی، p2 دست مهدی، p3 آزاد
+  ok(!C.canTake(st, p1.id, E.id).ok, 'زمین مصطفی نباید برای اسفندیار قابل خرید باشد');
+  ok(C.canTake(st, p2.id, E.id).ok, 'زمین مهدی باید قابل خرید باشد');
+  ok(C.canTake(st, p3.id, A.id).ok, 'زمین آزاد باید قابل خرید باشد');
+  ok(!C.setHolder(st, p1.id, E.id).ok); eq(p1.holderId, M.id);
+  ok(C.setHolder(st, p2.id, E.id).ok); eq(p2.holderId, E.id);
+  ok(C.setHolder(st, p1.id, null).ok);                                      // مصطفی آزادش می‌کند
+  ok(C.setHolder(st, p1.id, A.id).ok, 'بعد از آزاد شدن قابل خرید است');
+  const d = C.divisionLive(st), N = (f) => Number(f.n) / Number(f.d);
+  // ارزش کل ۱۰ میلیارد؛ حق هر پسر ۱/۷ = ۱٬۴۲۸٬۵۷۱٬۴۲۸٫۵۷…، مهدی ۴/۷
+  const byName = (n) => d.people.find(r => r.person.name === n);
+  near(N(byName('م').credit), 10e9 / 7 + 3e9, 1e-4); near(N(byName('مه').credit), 40e9 / 7 - 9e9, 1e-4);
+  near(N(byName('ا').held.length ? byName('ا').heldValue : C.frac(0)), 2e9, 1e-6);
+  near(N(byName('ام').remaining), 10e9 / 7 + 3e9 - 3e9, 1e-4);
+  // جمع اعتبارها = ارزش کل؛ جمع مانده‌ها = ارزش زمین‌های آزاد (p3) بدون هیچ خطای گردکردن
+  near(N(d.sumCredit), 10e9, 1e-6); near(N(d.sumRemaining), 5e9, 1e-6);
+  eq(d.errors.length, 0);
+  // اگر «سایر» عوض شود جمع تعدیل‌ها صفر نیست ⇒ هشدار
+  st.adjust = { [A.id]: '+2 میلیارد' };
+  ok(C.divisionLive(st).warns.some(x => /صفر نیست/.test(x)));
+  // حذف شخص: زمین‌هایش آزاد می‌شود
+  C.removePerson(st, A.id); eq(p1.holderId, null);
 });
 
 (async () => {

@@ -903,7 +903,7 @@
   function newParcel(init) {
     const t = nowIso();
     return Object.assign({
-      id: uid('land'), name: '', scope: 'rural_inside', estateId: null,
+      id: uid('land'), name: '', scope: 'rural_inside', estateId: null, holderId: null,
       geometry: null, areaComputed: null, areaOverride: null,
       attrs: { residential: 'unknown', agri: 'none', farmType: 'irrigated', urbanUse: 'residential' },
       grade: 'manual', gradeSource: 'auto', gradeReason: '', special: false, specialReason: '',
@@ -1614,6 +1614,9 @@
   /** حذف کامل یک شخص از همه‌جا (واگذاری‌ها، بخش‌ها، معامله‌ها و عضویت پرونده‌ها) */
   function removePerson(state, personId) {
     state.persons = state.persons.filter(x => x.id !== personId);
+    (state.parcels || []).forEach(p => { if (p.holderId === personId) p.holderId = null; });
+    if (state.adjust) delete state.adjust[personId];
+    if (state.house) { if (state.house.payer === personId) state.house.payer = ''; state.house.receivers = (state.house.receivers || []).filter(id => id !== personId); }
     (state.estates || []).forEach(e => { if (e.weights) delete e.weights[personId]; });
     (state.scenarios || []).forEach(sc => {
       Object.keys(sc.allocations || {}).forEach(k => {
@@ -1955,6 +1958,88 @@
   }
 
   /* ---------------------------------------------------------------- */
+  /* تقسیم زنده: همه‌چیز مستقیم از «دسته‌ی هر زمین» و «دست کی بودن» حساب می‌شود */
+  /* هیچ فهرست یا عدد حفظ‌شده‌ای وجود ندارد؛ با هر تغییر، همه‌چیز از نو محاسبه می‌شود */
+  /* ---------------------------------------------------------------- */
+  const parcelValueF = (p) => frac(Math.round((p && p.valuation && isFinite(p.valuation.total) && p.valuation.total) || 0));
+  /** کسی که زمین‌هایش قابل خرید است (کسی که در «خانه‌ی شهر» بدهکار است) */
+  const sellerId = (state) => (state.house && state.house.payer) || '';
+  /** دست چه کسی است؟ شناسه‌ی نامعتبر = آزاد */
+  function holderOfParcel(state, p) {
+    return (p && p.holderId && (state.persons || []).some(x => x.id === p.holderId)) ? p.holderId : '';
+  }
+  /** آیا شخص می‌تواند این زمین را بردارد؟ فقط زمینِ فروشنده یا زمین آزاد (خارج‌شده از لیست کسی) */
+  function canTake(state, parcelId, personId) {
+    const p = (state.parcels || []).find(x => x.id === parcelId);
+    if (!p) return { ok: false, reason: 'زمین پیدا نشد' };
+    const cur = holderOfParcel(state, p);
+    if (!personId || cur === personId) return { ok: true };
+    if (!cur || cur === sellerId(state)) return { ok: true };
+    const o = (state.persons || []).find(x => x.id === cur);
+    return { ok: false, reason: 'این زمین دست «' + (o ? o.name : '؟') + '» است؛ تا او آزادش نکند قابل خرید نیست' };
+  }
+  /** تغییر «دست کی»؛ force برای ثبت اولیه‌ی زمین (بدون محدودیت) */
+  function setHolder(state, parcelId, personId, force) {
+    const p = (state.parcels || []).find(x => x.id === parcelId);
+    if (!p) return { ok: false, reason: 'زمین پیدا نشد' };
+    const chk = force ? { ok: true } : canTake(state, parcelId, personId);
+    if (!chk.ok) return chk;
+    p.holderId = personId || null;
+    return { ok: true };
+  }
+  /**
+   * محاسبه‌ی کامل با کسر دقیق:
+   *  حق از هر دسته = ارزش دسته × (وزن شخص ÷ جمع وزن‌ها)
+   *  اعتبار = جمع حق‌ها + خانه‌ی شهر + «سایر» ؛ مانده = اعتبار − ارزش زمین‌های دستش
+   */
+  function divisionLive(state) {
+    const persons = state.persons || [], parcels = state.parcels || [], estates = state.estates || [];
+    const errors = [], warns = [];
+    const pid = (x) => x.id;
+    const gid = (p) => p.estateId && estates.some(e => e.id === p.estateId) ? p.estateId : '';
+    // دسته‌ها
+    const cats = estates.map(e => {
+      const ps = parcels.filter(p => gid(p) === e.id);
+      let V = F0(), area = 0;
+      ps.forEach(p => { V = fAdd(V, parcelValueF(p)); area += (p.valuation && p.valuation.area) || 0; });
+      const w = estateWeights(state, e.id);
+      const shares = persons.map((x, i) => (fSign(w.sum) > 0 ? fDiv(w.weights[i], w.sum) : F0()));
+      if (ps.length && fSign(w.sum) <= 0) errors.push('برای دسته‌ی «' + e.name + '» سهمی ثبت نشده است');
+      return { id: e.id, name: e.name, count: ps.length, area, value: V, weights: w.weights, weightSum: w.sum, usedDefault: w.usedDefault, shares };
+    });
+    const unc = parcels.filter(p => !gid(p));
+    let uncV = F0(); unc.forEach(p => { uncV = fAdd(uncV, parcelValueF(p)); });
+    if (unc.length) warns.push(unc.length + ' زمین «دسته‌بندی‌نشده» است و در هیچ سهمی حساب نمی‌شود');
+    // خانه‌ی شهر
+    const h = state.house || {};
+    let amount = F0();
+    if (h.amount != null && h.amount !== '') { amount = parseAdjust(h.amount); if (!amount) { errors.push('مبلغ خانه‌ی شهر نامعتبر است'); amount = F0(); } }
+    const recv = (h.receivers || []).filter(id => persons.some(x => x.id === id));
+    const houseOf = (id) => recv.indexOf(id) >= 0 ? amount : (id === h.payer ? fNeg(fMul(amount, frac(recv.length))) : F0());
+    // نفرات
+    const people = persons.map((x, i) => {
+      let ent = F0(); const parts = cats.map(c => { const v = fMul(c.value, c.shares[i]); ent = fAdd(ent, v); return { id: c.id, name: c.name, weight: c.weights[i], share: c.shares[i], value: v }; });
+      const hf = houseOf(x.id);
+      let adj = parseAdjust((state.adjust || {})[x.id]);
+      if (!adj) { errors.push('مبلغ «سایر» ' + x.name + ' نامعتبر است'); adj = F0(); }
+      const credit = fAdd(fAdd(ent, hf), adj);
+      const held = parcels.filter(p => holderOfParcel(state, p) === x.id);
+      let heldV = F0(), heldArea = 0; held.forEach(p => { heldV = fAdd(heldV, parcelValueF(p)); heldArea += (p.valuation && p.valuation.area) || 0; });
+      const remaining = fSub(credit, heldV);
+      return { person: x, parts, entitlement: ent, house: hf, adjust: adj, credit, held, heldValue: heldV, heldArea, remaining, remainingNum: fToNumber(remaining) };
+    });
+    let total = F0(); parcels.forEach(p => { total = fAdd(total, parcelValueF(p)); });
+    const free = parcels.filter(p => !holderOfParcel(state, p));
+    let freeV = F0(); free.forEach(p => { freeV = fAdd(freeV, parcelValueF(p)); });
+    let sumAdj = F0(), sumRem = F0(), sumCredit = F0(), sumHeld = F0(), sumEnt = F0();
+    people.forEach(r => { sumAdj = fAdd(sumAdj, fAdd(r.house, r.adjust)); sumRem = fAdd(sumRem, r.remaining); sumCredit = fAdd(sumCredit, r.credit); sumHeld = fAdd(sumHeld, r.heldValue); sumEnt = fAdd(sumEnt, r.entitlement); });
+    if (fSign(sumAdj) !== 0) warns.push('جمع «خانه‌ی شهر + سایر» صفر نیست (' + fToNumber(sumAdj).toLocaleString('en') + ' تومان)؛ یعنی کسی طلب یا بدهی بی‌طرف دارد');
+    if (fSign(uncV) === 0 && persons.length && fSign(sumRem) !== 0 && !free.length && fSign(sumAdj) === 0) errors.push('خطای حساب: همه‌ی زمین‌ها دست کسی است و جمع مانده‌ها صفر نشد');
+    // مانده‌ها وقتی همه‌ی زمین‌ها برداشته شده و تعدیل‌ها متوازن است باید دقیقاً جمعشان صفر شود
+    return { cats, people, total, free, freeValue: freeV, unclassified: unc, unclassifiedValue: uncV, sumEntitlement: sumEnt, sumCredit, sumHeld, sumAdjust: sumAdj, sumRemaining: sumRem, errors, warns, seller: sellerId(state), house: { amount, receivers: recv, payer: h.payer || '' } };
+  }
+
+  /* ---------------------------------------------------------------- */
   return {
     setProj4, normDigits, toNum, uid, nowIso, clone,
     // کسر دقیق
@@ -1978,5 +2063,7 @@
     buildDivisionSheets,
     // پرونده‌ی زنده
     parcelSnap, caseParcels, createCase, convertScenarioToCase, addSection, setSectionWeight, sectionWeightFrac, addDeal, removePerson, evaluateCase, parseAdjust, sectionsFromEstates,
+    // تقسیم زنده‌ی ساده (دسته + دست کی)
+    divisionLive, canTake, setHolder, holderOfParcel, sellerId,
   };
 });

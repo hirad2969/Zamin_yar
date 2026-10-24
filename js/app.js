@@ -14,6 +14,8 @@
     if (!s) return s;
     if (!Array.isArray(s.estates)) s.estates = [];
     if (!Array.isArray(s.persons)) s.persons = [];
+    if (!s.house) s.house = { amount: '', receivers: [], payer: '' };
+    if (!s.adjust) s.adjust = {};
     (s.scenarios || []).forEach(sc => { if (sc && !sc.priceBasis) sc.priceBasis = { mode: 'snapshot', level: 'base', version: sc.settingsVersion, factor: 1, ignoreOverride: false }; });
     return s;
   };

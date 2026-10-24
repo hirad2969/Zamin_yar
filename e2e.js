@@ -68,7 +68,7 @@ const near = (a, b, t, m) => { if (!isFinite(a) || Math.abs(a - b) > t) throw ne
   /* ---- ثبت زمین (آزمون ۱: ۱۰۰۰۰ م² × ۱۵۰۰۰۰) با قیمت دستی ---- */
   await T('آزمون ۱ در رابط: اطراف روستا، آبی، درجه ۱ ویژه ⇒ قیمت ۱۵۰٬۰۰۰ و ارزش ≈ مساحت × قیمت', async () => {
     await page.click('.choice:has-text("اطراف روستا")');
-    await page.selectOption('#form-root select:not(#f-estate) >> nth=1', 'grade1'); // نوع=آبی (اول)، درجه (دوم)
+    await page.selectOption('#form-root select:not(#f-estate):not(#f-holder) >> nth=1', 'grade1'); // نوع=آبی (اول)، درجه (دوم)
     await page.click('.choice:has-text("ویژه")');
     const sum = await page.textContent('#f-sum');
     ok(sum.includes('۱۵۰٬۰۰۰'), sum);
@@ -117,8 +117,8 @@ const near = (a, b, t, m) => { if (!isFinite(a) || Math.abs(a - b) > t) throw ne
     const t = await page.textContent('#f-sugg'); ok(t.includes('نیازمند تعیین دستی'), t);
     const s = await page.textContent('#f-sum'); ok(!s.includes('قطعی') || s.includes('ناقص') || s.includes('موقت'), s);
     // تأیید مسکونی و آبی ⇒ پیشنهاد درجه یک
-    await page.selectOption('#form-root select:not(#f-estate) >> nth=0', 'confirmed');
-    await page.selectOption('#form-root select:not(#f-estate) >> nth=1', 'irrigated');
+    await page.selectOption('#form-root select:not(#f-estate):not(#f-holder) >> nth=0', 'confirmed');
+    await page.selectOption('#form-root select:not(#f-estate):not(#f-holder) >> nth=1', 'irrigated');
     const t2 = await page.textContent('#f-sugg'); ok(t2.includes('درجه یک'), t2);
   });
 
@@ -145,7 +145,7 @@ const near = (a, b, t, m) => { if (!isFinite(a) || Math.abs(a - b) > t) throw ne
     await page.click('#focus-toggle'); // بازگشت به فرم
     ok(await page.evaluate(() => !document.body.classList.contains('map-focus')), 'بازگشت به فرم کار نکرد');
     await page.click('.choice:has-text("اطراف روستا")');
-    await page.selectOption('#form-root select:not(#f-estate) >> nth=1', 'grade2');
+    await page.selectOption('#form-root select:not(#f-estate):not(#f-holder) >> nth=1', 'grade2');
     await page.fill('#f-name', 'ترسیمی');
     await page.click('text=ثبت زمین >> nth=-1');
     const p = await page.evaluate(() => App.S.parcels.find(x => x.name === 'ترسیمی'));
@@ -196,21 +196,19 @@ const near = (a, b, t, m) => { if (!isFinite(a) || Math.abs(a - b) > t) throw ne
   });
 
   /* ---- تقسیم ---- */
-  await T('تقسیم: اشخاص و سناریو ⇒ اختلاف ارزش سهم و عکس قیمت‌های قدیمی', async () => {
+  await T('تقسیم: دو نفر، دسته، دست کی ⇒ حق، مانده و جمع دقیق', async () => {
     const p2 = global.page2;
-    await p2.click('#tabs >> text=اشخاص و تقسیم');
-    for (const n of ['علی', 'رضا']) { await p2.fill('#people-root input[placeholder="نام شخص"]', n); await p2.click('#people-root >> text=افزودن >> nth=0'); }
-    await p2.evaluate(() => { const d = document.getElementById('old-scenarios'); if (d) d.open = true; });
-    await p2.fill('#people-root input[placeholder^="نام سناریو"]', 'تقسیم اول');
-    await p2.click('text=ساخت سناریوی جدید از همه‌ی زمین‌ها');
-    const r = await p2.evaluate(() => { const sc = App.S.scenarios[0]; return { v: sc.settingsVersion, n: Object.keys(sc.parcels).length }; });
-    ok(r.v === 2 && r.n === 2, JSON.stringify(r));
-    // همه‌ی زمین اول به علی
-    const ids = await p2.evaluate(() => Object.keys(App.S.scenarios[0].parcels));
-    await p2.evaluate(([a, b]) => { const sc = App.S.scenarios[0]; App.C.setAllocation(sc, a, App.S.persons[0].id, 1); App.C.setAllocation(sc, b, App.S.persons[1].id, 1); App.save(); }, ids);
-    const ev = await p2.evaluate(() => { const ev = App.C.evaluateScenario(App.S, App.S.scenarios[0]); return { pool: ev.pool, un: ev.unallocated.length, r: ev.results.map(x => [x.person.name, x.entitled, x.received, x.diff]) }; });
-    // دو زمین با ارزش‌های متفاوت به دو نفر با سهم برابر: اختلاف‌ها قرینه‌اند و مجموعشان صفر است
-    ok(ev.un === 0 && ev.r[0][2] + ev.r[1][2] === ev.pool && Math.abs(ev.r[0][3] + ev.r[1][3]) <= 2 && ev.r[0][3] !== 0, JSON.stringify(ev));
+    await p2.click('#tabs >> text=تقسیم');
+    for (const n of ['علی', 'رضا']) { await p2.fill('#per-new', n); await p2.click('#per-add'); }
+    await p2.fill('#cat-new', 'پدری'); await p2.click('#cat-add');
+    await p2.evaluate(() => { const S = App.S; S.parcels.forEach(p => { p.estateId = S.estates[0].id; }); S.persons.forEach(x => App.C.setEstateWeight(S, S.estates[0].id, x.id, '1')); App.save(); App.tab('map'); App.tab('people'); });
+    const ids = await p2.evaluate(() => App.S.parcels.map(p => p.id));
+    await p2.selectOption('#pick-list .prow[data-pid="' + ids[0] + '"] .hold-sel', { index: 1 });
+    await p2.selectOption('#pick-list .prow[data-pid="' + ids[1] + '"] .hold-sel', { index: 2 });
+    const d = await p2.evaluate(() => { const d = App.C.divisionLive(App.S); return { pool: Number(d.total.n / d.total.d), rem: d.people.map(x => Number(x.remaining.n) / Number(x.remaining.d)), un: d.free.length, err: d.errors }; });
+    // دو زمین، دو نفر با سهم برابر و هر کدام یکی: مانده‌ها قرینه و جمعشان صفر
+    ok(d.un === 0 && d.err.length === 0 && Math.abs(d.rem[0] + d.rem[1]) < 1e-6 && d.rem[0] !== 0, JSON.stringify(d));
+    ok((await p2.textContent('#strip-box')).includes('علی'));
   });
 
   await T('بدون خطای اسکریپت در کل جلسه', async () => { ok(errors.length === 0, errors.join(' | ')); });
