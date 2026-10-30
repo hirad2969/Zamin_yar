@@ -933,6 +933,20 @@ t('تعدیل جمع و تفریقی: +/− روی حق هر نفر؛ مانده
   eq(C.fText(C.parseAdjust('')), '0'); ok(C.parseAdjust('+-5') === null);
 });
 
+t('تقسیم به چند قسمت با نسبت دلخواه: مساحت‌ها دقیق و جمعشان = کل', () => {
+  const ring = sqLL;
+  const total = C.areaM2(ring);
+  for (const ratio of [['1', '1'], ['1', '1', '1'], ['8', '8', '1', '4']]) {
+    const r = C.splitMulti(ring, ratio, { azimuth: 30 });
+    ok(r.ok, JSON.stringify(r.errors));
+    const S = ratio.reduce((a, x) => a + Number(x), 0);
+    r.parts.forEach((p, i) => near(p.area, total * Number(ratio[i]) / S, 0.01, 'قسمت ' + (i + 1)));
+    near(r.parts.reduce((a, p) => a + p.area, 0), total, 0.01);
+    eq(r.parts.length, ratio.length);
+  }
+  ok(!C.splitMulti(ring, ['1']).ok); ok(!C.splitMulti(ring, ['1', '0']).ok);
+});
+
 t('فهرست پیش‌فرض (js/seed.js): ۴۹ زمین، سه دسته، حق هر نفر و خانه‌ی شهر — همه زنده', () => {
   const w = {}; new Function('window', require('fs').readFileSync(__dirname + '/js/seed.js', 'utf8'))(w);
   const st = w.ZY_SEED;

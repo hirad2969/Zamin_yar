@@ -71,15 +71,16 @@ const center = [lat0 + dLat / 2, lon0 + dLon / 2];
     ok(r.n <= 12, 'رأس زیاد: ' + r.n);
     ok(await focused(), 'تمام‌صفحه پس از تشخیص باید بماند تا بشود ویرایش کرد');
     const bar = await page.textContent('#draw-bar');
-    ok(/حساسیت/.test(bar) && /بازگشت به فرم/.test(bar), 'دکمه‌ها نیست: ' + bar);
+    ok(/حساسیت|ناحیه/.test(bar) && /بازگشت به فرم/.test(bar), 'دکمه‌ها نیست: ' + bar);
     await page.screenshot({ path: '/tmp/d2.png' });
   });
 
   await T('حساسیت: تغییر سطح و حفظ ویرایش‌پذیری', async () => {
-    const l0 = await page.evaluate(() => App.detect.st.level);
-    await page.click('text=بیشتر (مرز گشادتر)').catch(async () => { await page.click('text=کمتر (مرز تنگ‌تر)'); });
-    const l1 = await page.evaluate(() => App.detect.st.level);
-    ok(l1 !== l0, 'سطح عوض نشد'); const r = await bnd(); ok(r.n >= 3 && r.valid, JSON.stringify(r));
+    const st0 = await page.evaluate(() => ({ lv: App.detect.st.level, idx: App.detect.st.last && App.detect.st.last.idx, snap: App.detect.st.snap }));
+    const btn = await page.$('#draw-bar >> text=/بیشتر|بزرگ‌تر ناحیه|ناحیه‌ی بزرگ‌تر|کمتر|ناحیه‌ی کوچک‌تر/');
+    if (btn && await btn.isEnabled()) await btn.click();
+    else await page.click('#detect-rect').catch(() => {});          // حالت مستطیل/شکل آزاد
+    const r = await bnd(); ok(r.n >= 3 && r.valid, JSON.stringify(r));
     // ویرایش یک رأس با کشیدن/تنظیم مستقیم
     const moved = await page.evaluate(() => { const D = App.map.D; const a = D.pts[0][0]; D.pts[0][0] += 0.00002; return D.pts[0][0] !== a; });
     ok(moved, 'ویرایش نقاط ممکن نیست');

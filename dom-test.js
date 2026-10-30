@@ -257,6 +257,22 @@ t('فرم ثبت زمین: گزینه‌ی «دست کی است؟» کنار د�
   ok(doc.getElementById('f-estate'), 'دسته در فرم نیست');
 });
 
+
+t('تقسیم به چند قسمت: نسبت ۱:۱:۱ ⇒ سه قسمت برابر در رابط و ثبت سه زمین', () => {
+  w.eval('App.tab("map")');
+  const before = w.App.S.parcels.length;
+  w.App.split.openRing(sqLL, { name: 'آزمون' });
+  const inp = doc.getElementById('split-ratio'); ok(inp, 'کادر نسبت نیست');
+  inp.value = '1:1:1'; inp.dispatchEvent(new w.Event('input', { bubbles: true }));
+  const out = doc.getElementById('split-out').textContent;
+  has(out, 'جمع قسمت‌ها = مساحت کل');
+  const r = w.App.split.mres; ok(r && r.parts.length === 3, 'سه قسمت نشد');
+  const total = C.areaM2(sqLL); r.parts.forEach(p => near(p.area, total / 3, 0.01));
+  click(doc.getElementById('split-save'));
+  const yes = Array.from(doc.querySelectorAll('#modal-root .mf .btn')).find(b => /ثبت شود/.test(b.textContent)); ok(yes, 'تأیید نیست');
+  click(yes);
+  eq(w.App.S.parcels.length - before, 3, 'سه زمین ثبت نشد');
+});
 console.log(out.join('\n'));
 console.log(`\nموفق: ${pass}  ناموفق: ${fail}`);
 process.exit(fail ? 1 : 0);

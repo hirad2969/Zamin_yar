@@ -11,6 +11,7 @@
     src: null,                 // { name, parcel } منبع برش (برای کپی‌کردن صفت‌ها)
     unit: 'percent', text: '1/2', azimuth: 0, side: 'a',
     name1: '', name2: '', dropSource: false,
+    ratio: '', ratioParts: null, mres: null,
   };
   const ll = (p) => [p[1], p[0]];
   const panel = () => document.getElementById('split-panel');
@@ -28,7 +29,7 @@
     SP.pre = C.splitPrepare(v.ring);
     if (!SP.pre.ok) { App.toast((SP.pre.errors || ['برش ممکن نیست'])[0], 'err'); return; }
     SP.src = src || null;
-    SP.res = null; SP.visible = true;
+    SP.res = null; SP.visible = true; SP.ratio = ''; SP.ratioParts = null; SP.mres = null;
     SP.side = 'a'; SP.unit = 'percent'; SP.text = '1/2';
     const az = C.principalAzimuth(v.ring);
     SP.azimuth = az == null ? 0 : Math.round(az * 10) / 10;
@@ -61,7 +62,7 @@
     SP.openRing(p.geometry.ring, { name: p.name || '', parcel: p });
   };
   SP.close = function () {
-    SP.visible = false; SP.pre = null; SP.res = null;
+    SP.visible = false; SP.pre = null; SP.res = null; SP.mres = null; SP.ratioParts = null;
     const p = panel(); if (p) { p.hidden = true; p.innerHTML = ''; }
     if (SP.layer) SP.layer.clearLayers();
   };
@@ -89,6 +90,7 @@
   }
   function recompute(keepView) {
     if (!SP.pre) return;
+    if (SP.ratioParts && SP.ratioParts.length >= 3) return recomputeMulti(keepView);
     const box = document.getElementById('split-out');
     const t = targetM2();
     if (t.error) { SP.res = null; drawPreview(null); if (box) box.innerHTML = '<div class="box warn">' + App.esc(t.error) + '</div>'; return; }
@@ -164,6 +166,69 @@
     if (r.line && r.line.length === 2) L.polyline(r.line.map(ll), { color: '#d32f2f', weight: 4, dashArray: '9 7' }).addTo(layer);
   }
 
+
+  /* ---------------- تقسیم به چند قسمت با نسبت (۱:۱:۱ ، ۸:۸:۱:۴ …) ---------------- */
+  const PALETTE = ['#2e7d32', '#e65100', '#1565c0', '#6a1b9a', '#00838f', '#ad1457', '#558b2f', '#4e342e'];
+  function parseRatio(txt) {
+    const toks = String(txt || '').split(/[:،,\s]+/).filter(Boolean);
+    if (toks.length < 2) return null;
+    const out = toks.map(t => { const f = C.toFrac(t); return f && C.fSign(f) > 0 ? t : null; });
+    return out.some(x => x == null) ? null : out;
+  }
+  function setRatio(txt) {
+    SP.ratio = txt;
+    const i = document.getElementById('split-ratio'); if (i && i.value !== txt) i.value = txt;
+    const parts = parseRatio(txt);
+    SP.ratioParts = parts; SP.mres = null;
+    if (parts && parts.length === 2) {        // دو قسمت: همان مسیر دقیق قبلی (با دستگیره‌ی کشیدنی)
+      const a = C.toFrac(parts[0]), b = C.toFrac(parts[1]), f = C.fDiv(a, C.fAdd(a, b));
+      SP.unit = 'percent'; SP.text = C.fText(f);
+      const ti = document.getElementById('split-target'); if (ti) ti.value = SP.text;
+      const us = document.getElementById('split-unit'); if (us) us.value = 'percent';
+    }
+    build(); recompute();
+  }
+  function recomputeMulti() {
+    const box = document.getElementById('split-out');
+    const r = C.splitMulti(SP.pre.ring, SP.ratioParts, { azimuth: SP.azimuth });
+    const layer = ensureLayer(); if (layer) layer.clearLayers();
+    if (!r.ok) { SP.mres = null; if (box) box.innerHTML = '<div class="box err">' + App.esc((r.errors || ['برش ممکن نیست'])[0]) + '</div>'; return; }
+    SP.mres = r;
+    r.parts.forEach((p, i) => {
+      const col = PALETTE[i % PALETTE.length];
+      L.polygon(p.ring.map(ll), { color: col, weight: 2, fillColor: col, fillOpacity: 0.28 })
+        .bindTooltip('<div dir="rtl"><b>' + App.esc(partName(i)) + '</b><br>' + App.area(p.area) + '</div>', { className: 'fa', sticky: true }).addTo(layer);
+    });
+    const ok = Math.abs(r.sumAreas - r.totalArea) < Math.max(0.05, r.totalArea * 1e-6);
+    let h = '<table class="t"><thead><tr><th>قسمت</th><th>سهم</th><th>متراژ خواسته‌شده</th><th>مساحت محاسبه‌شده</th><th>اختلاف (م²)</th></tr></thead><tbody>' +
+      r.parts.map((p, i) => '<tr><td style="color:' + PALETTE[i % PALETTE.length] + '"><b>' + App.esc(partName(i)) + '</b></td><td>' + App.esc(App.fa(C.fText(p.share))) + '</td><td>' + App.n(p.target, 2) + '</td><td><b>' + App.n(p.area, 2) + '</b></td><td class="' + (Math.abs(p.errorM2) < 0.05 ? 'pos' : 'neg') + '">' + App.n(p.errorM2, 3) + '</td></tr>').join('') +
+      '</tbody></table><div class="' + (ok ? 'pos' : 'neg') + '">' + (ok ? '✔ جمع قسمت‌ها = مساحت کل (' + App.area(r.totalArea) + ')' : '✘ جمع قسمت‌ها با مساحت کل یکی نیست') + '</div>';
+    (r.warnings || []).slice(0, 3).forEach(w => { h += '<div class="box warn">' + App.esc(w) + '</div>'; });
+    if (box) box.innerHTML = h;
+  }
+  const partName = (i) => ((SP.src && SP.src.name) ? SP.src.name + ' — ' : '') + 'قسمت ' + App.n(i + 1, 0);
+  function saveMulti() {
+    const r = SP.mres; if (!r) { App.toast('نسبت‌ها را درست بنویسید.', 'warn'); return; }
+    const S = App.S, src = (SP.src && SP.src.parcel) || (App.form ? App.form.cur : null);
+    const made = r.parts.map((p, i) => {
+      const np = C.newParcel({ grade: 'manual' });
+      if (src) ['scope', 'attrs', 'grade', 'gradeSource', 'gradeReason', 'special', 'specialReason', 'features', 'featuresReviewed', 'notes', 'pricing', 'priceMode', 'estateId'].forEach(k => { if (src[k] !== undefined) np[k] = C.clone(src[k]); });
+      np.id = C.uid('land'); np.name = partName(i);
+      np.geometry = { ring: p.ring.map(q => [q[0], q[1]]), source: 'split', meta: { method: 'تقسیم به نسبت ' + SP.ratioParts.join(':'), part: i + 1, targetM2: p.target, azimuth: r.azimuth, at: C.nowIso() } };
+      np.areaComputed = C.areaM2(p.ring);
+      np.history = [{ at: C.nowIso(), type: 'split', reason: 'تقسیم به نسبت ' + SP.ratioParts.join(':') + ' — قسمت ' + (i + 1) + '، جهت ' + App.n(r.azimuth, 1) + '°' }];
+      return np;
+    });
+    const drop = SP.dropSource && SP.src && SP.src.parcel;
+    App.confirm('ثبت ' + App.n(made.length, 0) + ' زمین', made.map(m => App.esc(App.area(m.areaComputed))).join('، ') + ' ثبت شود؟' + (drop ? '<br>زمین اصلی حذف می‌شود.' : ''), () => {
+      made.forEach(m => C.addParcel(S, m));
+      if (drop) { const id = SP.src.parcel.id; S.parcels = S.parcels.filter(x => x.id !== id); }
+      S.log.push({ at: C.nowIso(), msg: 'تقسیم زمین به ' + made.length + ' قسمت با نسبت ' + SP.ratioParts.join(':') });
+      App.save(); App.emit('state'); App.toast(App.n(made.length, 0) + ' زمین ثبت شد', 'ok'); SP.close();
+      if (App.form) App.form.newParcel(true);
+    }, 'ثبت شود');
+  }
+
   /* ---------------- رابط پنل ---------------- */
   function build() {
     const p = panel(); if (!p) return;
@@ -172,8 +237,16 @@
       el('b', { class: 'grow', text: '✂️ تقسیم یک زمین به دو قسمت با متراژ مشخص' }),
       el('button', { class: 'btn sm dng', text: 'بستن', onclick: () => SP.close() }),
     ]));
-    p.appendChild(el('div', { class: 'note', text: 'برای زمین‌هایی که مرز داخلی‌شان روی عکس ماهواره نشانه‌ای ندارد: مرز کل زمین را دارید، متراژ یک قسمت را می‌دهید و برنامه خط جداکننده را دقیقاً جایی می‌کشد که مساحت درست شود. جهت خط را بچرخانید یا دستگیره‌ی قرمز را روی نقشه بکشید.' }));
+    p.appendChild(el('div', { class: 'note', text: 'همه‌چیز همین‌جا پیداست: نسبت یا متراژ را بنویسید، جهت خط را تنظیم کنید و ثبت بزنید. خط‌ها دقیقاً روی مساحت واقعی می‌نشینند.' }));
     p.appendChild(el('div', { class: 'box info', html: 'مساحت کل زمین: <b>' + App.area(SP.pre.totalArea) + '</b>' + (SP.src && SP.src.name ? ' — «' + App.esc(SP.src.name) + '»' : '') }));
+
+
+    /* نسبت قسمت‌ها: ۲ قسمت یا بیشتر */
+    const rin = el('input', { id: 'split-ratio', type: 'text', dir: 'ltr', value: SP.ratio, style: 'width:150px', placeholder: 'مثلاً 1:1:1 یا 8:8:1:4', oninput: (e) => { SP.ratio = e.target.value; const parts = parseRatio(e.target.value); if (parts && (parts.length >= 3) !== !!(SP.ratioParts && SP.ratioParts.length >= 3)) { setRatio(e.target.value); const n = document.getElementById('split-ratio'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } } else { SP.ratioParts = parts; recompute(); } } });
+    p.appendChild(el('div', { class: 'f' }, [el('span', { text: 'تقسیم به چند قسمت — نسبت‌ها' }), el('div', { class: 'row' }, [rin,
+      el('button', { class: 'btn sm sec2', text: '۱:۱', onclick: () => setRatio('1:1') }),
+      el('button', { class: 'btn sm sec2', text: '۱:۱:۱', onclick: () => setRatio('1:1:1') }),
+      el('button', { class: 'btn sm sec2', text: '۱:۱:۱:۱', onclick: () => setRatio('1:1:1:1') })])]));
 
     /* متراژ قسمت ۱ */
     const unit = el('select', { id: 'split-unit', style: 'width:auto', onchange: (e) => { SP.unit = e.target.value; if (SP.unit === 'percent' && !/[\/٪%]/.test(SP.text)) { const f = C.toFrac(SP.text); if (f && SP.res) SP.text = C.fPct(C.frac(Math.round(C.fToNumber(f) * 1e6), Math.round(SP.pre.total * 1e6) || 1), 4); } recompute(); } },
@@ -220,7 +293,7 @@
       p.appendChild(el('label', { class: 'note', style: 'display:flex;gap:6px;align-items:center' }, [cb, 'زمین اصلی («' + (SP.src.parcel.name || '—') + '») پس از ثبت دو قسمت حذف شود']));
     }
     p.appendChild(el('div', { class: 'row', style: 'margin-top:8px' }, [
-      el('button', { class: 'btn', text: '💾 ثبت دو زمین جدید', onclick: saveParts }),
+      el('button', { class: 'btn', id: 'split-save', text: (SP.ratioParts && SP.ratioParts.length >= 3) ? '💾 ثبت ' + App.n(SP.ratioParts.length, 0) + ' زمین جدید' : '💾 ثبت دو زمین جدید', onclick: () => (SP.ratioParts && SP.ratioParts.length >= 3) ? saveMulti() : saveParts() }),
       el('button', { class: 'btn sec2', text: 'قسمت ۱ → فرم ثبت', onclick: () => usePart(1) }),
       el('button', { class: 'btn sec2', text: 'قسمت ۲ → فرم ثبت', onclick: () => usePart(2) }),
       el('button', { class: 'btn sec2', text: 'خروجی GeoJSON', onclick: exportGeo }),

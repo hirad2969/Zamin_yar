@@ -91,7 +91,7 @@ console.log('۹) دو زمین تقریباً هم‌رنگ (اختلاف کم) 
   const r = D.prepare(img, { x: 180, y: 250 }).byArea(truth * 0.95); // کاربر ۵٪ کم تخمین زده
   const a = area(r.ring);
   ok(r.ok && Math.abs(a - truth) / truth < 0.08, 'مرز روی خط جداکننده‌ی کمرنگ (' + a.toFixed(0) + ' از ' + truth + ')');
-  const xs = r.ring.map(p => p[0]); ok(Math.max.apply(null, xs) < 275 && Math.max.apply(null, xs) > 245, 'لبه‌ی راست نزدیک x=260: ' + Math.max.apply(null, xs).toFixed(0));
+  const fin = r.rectOk ? r.rect : r.ring, xs = fin.map(p => p[0]); ok(r.rectOk, 'مستطیل برازش‌شده روی لبه‌ها معتبر است'); ok(Math.max.apply(null, xs) < 266 && Math.max.apply(null, xs) > 254, 'لبه‌ی راست مستطیل نزدیک x=260: ' + Math.max.apply(null, xs).toFixed(1)); ok(Math.abs(area(fin) - truth) / truth < 0.03, 'مساحت مستطیل ' + area(fin).toFixed(0) + ' از ' + truth);
 }
 console.log('۱۰) دو زمین هم‌رنگ با خط کمرنگ باریک بین‌شان');
 {
@@ -106,6 +106,33 @@ console.log('۱۱) تخمین مساحت ۲۰٪ بیشتر از واقعیت: م
   const img = make(512, 512, (x, y) => inRect(x, y, 150, 120, 350, 300) ? GREEN : BROWN);
   const truth = 200 * 180, r = D.prepare(img, { x: 250, y: 210 }).byArea(truth * 1.2), a = area(r.ring);
   ok(r.ok && a < truth * 1.4 && a > truth * 0.95, 'مساحت معقول (' + a.toFixed(0) + ' از ' + truth + ')');
+}
+
+console.log('۱۲) مستطیل چرخیده: مستطیل پیشنهادی با پرشدگی بالا');
+{
+  const th = 0.35, cs = Math.cos(th), sn = Math.sin(th);
+  const inside = (x, y) => { const u = (x - 260) * cs + (y - 250) * sn, v = -(x - 260) * sn + (y - 250) * cs; return Math.abs(u) < 100 && Math.abs(v) < 70; };
+  const img = make(512, 512, (x, y) => inside(x, y) ? GREEN : BROWN);
+  const r = D.prepare(img, { x: 260, y: 250 }).byArea(200 * 140);
+  ok(r.ok && r.rect && r.rectFill > 0.93, 'پرشدگی مستطیل ' + (r.rectFill || 0).toFixed(3));
+  const ra = area(r.rect); ok(Math.abs(ra - 28000) / 28000 < 0.06, 'مساحت مستطیل ' + ra.toFixed(0) + ' از 28000');
+}
+console.log('۱۳) یک سمتِ زمین کوهِ زبر: مرز نباید وارد کوه شود');
+{
+  const img = make(512, 512, (x, y) => {
+    if (x >= 330) return [110 + ((x * 7 + y * 13) % 40) - 20, 105 + ((x * 11 + y * 3) % 36) - 18, 95 + ((x * 5 + y * 17) % 30) - 15, 18]; // کوه
+    return inRect(x, y, 130, 140, 330, 360) ? [72, 118, 52, 6] : BROWN;
+  });
+  const truth = 200 * 220, r = D.prepare(img, { x: 230, y: 250 }).byArea(truth), a = area(r.ring);
+  const xs = r.ring.map(p => p[0]);
+  ok(r.ok && Math.abs(a - truth) / truth < 0.08 && Math.max.apply(null, xs) < 340, 'مساحت ' + a.toFixed(0) + ' از ' + truth + ' و بیشینه‌ی x=' + Math.max.apply(null, xs).toFixed(0));
+}
+console.log('۱۴) دو زمین هم‌رنگ با خط کمرنگ، بدون متراژ: «پایدارترین ناحیه» نباید هر دو را یکی کند');
+{
+  const img = make(512, 512, (x, y) => inRect(x, y, 258, 100, 261, 400) ? [60, 110, 42, 5] : inRect(x, y, 100, 100, 420, 400) ? [70, 120, 50, 5] : BROWN);
+  const r = D.prepare(img, { x: 180, y: 250 }).autoStable();
+  const one = 158 * 300, a = r.ok ? area(r.ring) : 0;
+  ok(r.ok && a < one * 1.15 && a > one * 0.85, 'فقط یک زمین (' + a.toFixed(0) + ' از ' + one + ')');
 }
 
 console.log('\nنتیجه:', pass, 'موفق،', fail, 'ناموفق');

@@ -106,7 +106,8 @@
         const g = await grab(latlng, z); await tick();
         const det = LD.prepare(g.img, { x: WIN / 2, y: WIN / 2 });
         const targetPx = est ? est / (mpp(z) * mpp(z)) : null;
-        const r = est ? det.byArea(targetPx) : det.auto();
+        let r = est ? det.byArea(targetPx) : det.autoStable();
+        if (!est && !r.ok) r = det.auto();
         last = { z, g, det, r, est, targetPx, mpp: mpp(z) };
         if (r.ok && !r.touchesEdge) break;
         if (zi < ZOOMS.length - 1) { say([el('b', { text: '⏳ زمین بزرگ‌تر از پنجره است؛ با دید وسیع‌تر دوباره تحلیل می‌شود…' })]); await tick(); }
@@ -122,7 +123,7 @@
       App.toast(r.reason === 'small' ? 'ناحیه‌ی همرنگ اطراف این نقطه خیلی کوچک است. نقطه‌ی دیگری از داخل زمین را لمس کنید یا مرز را دستی بکشید.' : 'مرز مشخصی تشخیص داده نشد. اگر مرز روی عکس نشانه‌ای ندارد، مرز کل زمین را بکشید و با «تقسیم به دو قسمت با متراژ مشخص» قسمت موردنظر را جدا کنید.', 'warn');
       waiting(splitHint()); return;
     }
-    AD.st = { latlng, z: last.z, g: last.g, det: last.det, level: r.level, est: last.est, targetPx: last.targetPx, mpp: last.mpp, mode: last.est ? 'area' : 'level' };
+    AD.st = { latlng, z: last.z, g: last.g, det: last.det, level: r.level, est: last.est, targetPx: last.targetPx, mpp: last.mpp, mode: last.est ? 'area' : (last.r.mode === 'stable' ? 'stable' : 'level'), snap: true };
     apply(r, true);
     AD.active = false; M.map.getContainer().style.cursor = ''; hideBar();
     if (r.touchesEdge) App.toast('زمین از محدوده‌ی تحلیل بزرگ‌تر است؛ مرز کامل نیست. مرز را دستی کامل کنید.', 'warn');
@@ -131,9 +132,12 @@
 
   function apply(r, fit) {
     const s = AD.st;
-    const ring = r.ring.map(p => LD.lngLat(s.g.x0 + p[0] + 0.5, s.g.y0 + p[1] + 0.5, s.z));
+    s.last = r;
+    const useRect = s.snap && r.rect && (r.rectOk || r.rectFill >= 0.88);          // زمین کشاورزی معمولاً مستطیلی است
+    const pix = useRect ? r.rect : r.ring;
+    const ring = pix.map(p => LD.lngLat(s.g.x0 + p[0] + 0.5, s.g.y0 + p[1] + 0.5, s.z));
     s.level = r.level;
-    M.setBoundary(ring, { source: 'auto', meta: { method: s.mode === 'area' ? 'تشخیص خودکار با متراژ تخمینی' : 'تشخیص خودکار از تصویر ماهواره‌ای (رشد ناحیه)', zoom: s.z, level: r.level, estimateM2: s.est || null, note: 'تقریبی؛ باید با چشم بررسی شود' }, fit: false });
+    M.setBoundary(ring, { source: 'auto', meta: { method: (s.mode === 'area' ? 'تشخیص خودکار با متراژ تخمینی (جست‌وجو در مستطیل اطراف نقطه، لبه‌ی باریک)' : 'تشخیص خودکار از تصویر ماهواره‌ای (پایدارترین ناحیه)') + (useRect ? ' — مستطیل' : ''), zoom: s.z, level: r.level, estimateM2: s.est || null, note: 'تقریبی؛ باید با چشم بررسی شود' }, fit: false });
     if (fit) M.map.fitBounds(L.latLngBounds(ring.map(ll)), { maxZoom: 19, padding: [60, 60] });
   }
 
@@ -144,18 +148,31 @@
       b.appendChild(el('span', { class: 'note', text: 'تشخیص با متراژ تخمینی ' + App.area(s.est) }));
       b.appendChild(el('button', { class: 'btn sm sec2', text: '− ۱۰٪ کوچک‌تر', onclick: () => stepArea(1 / 1.1) }));
       b.appendChild(el('button', { class: 'btn sm sec2', text: '+ ۱۰٪ بزرگ‌تر', onclick: () => stepArea(1.1) }));
+    } else if (s.mode === 'stable') {
+      const cur = s.last && s.last.idx != null ? s.last.idx : 0, cnt = s.last && s.last.count || 1;
+      b.appendChild(el('span', { class: 'note', text: 'تشخیص خودکار — ناحیه ' + App.n(cur + 1, 0) + ' از ' + App.n(cnt, 0) + ' (با متراژ تخمینی دقیق‌تر می‌شود)' }));
+      b.appendChild(el('button', { class: 'btn sm sec2', text: '− ناحیه‌ی کوچک‌تر', disabled: cur <= 0 ? true : null, onclick: () => stepStable(cur - 1) }));
+      b.appendChild(el('button', { class: 'btn sm sec2', text: '+ ناحیه‌ی بزرگ‌تر', disabled: cur >= cnt - 1 ? true : null, onclick: () => stepStable(cur + 1) }));
     } else {
       b.appendChild(el('span', { class: 'note', text: 'تشخیص خودکار — حساسیت ' + App.n(s.level + 1, 0) + ' از ' + App.n(s.det.levels, 0) }));
       b.appendChild(el('button', { class: 'btn sm sec2', text: '− کمتر (مرز تنگ‌تر)', disabled: s.level <= 0, onclick: () => step(-1) }));
       b.appendChild(el('button', { class: 'btn sm sec2', text: '+ بیشتر (مرز گشادتر)', disabled: s.level >= s.det.levels - 1, onclick: () => step(1) }));
     }
+    if (s.last && s.last.rect && (s.last.rectOk || s.last.rectFill >= 0.88) || !s.snap) b.appendChild(el('button', { class: 'btn sm sec2', id: 'detect-rect', text: s.snap ? '✎ شکل آزاد' : '▭ مستطیل', onclick: () => { s.snap = !s.snap; apply(s.last, false); M.refreshBar && M.refreshBar(); } }));
     b.appendChild(el('button', { class: 'btn sm sec2', text: '🎯 نقطه‌ی دیگر', onclick: () => AD.start() }));
   };
+  function stepStable(i) {
+    const s = AD.st; if (!s) return;
+    const r = s.det.autoStable(i);
+    if (!r.ok) { App.toast('ناحیه‌ی دیگری پیدا نشد.', 'warn'); return; }
+    apply(r, false);
+  }
   function stepArea(f) {
     const s = AD.st; if (!s) return;
     s.est = s.est * f; s.targetPx = s.targetPx * f;
     const r = s.det.byArea(s.targetPx);
     if (!r.ok) { App.toast('در این اندازه ناحیه‌ی معتبری پیدا نشد.', 'warn'); s.est /= f; s.targetPx /= f; return; }
+    s.snap = false;                       // تغییر دستیِ اندازه: شکل آزاد (برگشت به مستطیل با دکمه‌ی «▭ مستطیل»)
     apply(r, false);
     if (r.touchesEdge) App.toast('مرز به لبه‌ی محدوده‌ی تحلیل رسید؛ احتمالاً به زمین کناری نشت کرده.', 'warn');
   }

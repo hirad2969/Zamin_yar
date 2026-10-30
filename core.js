@@ -515,6 +515,30 @@
     return splitByArea(pre, targetM2, opts);
   }
   /** جهت پیشنهادی خط برش: عمود بر کشیدگی زمین (برای زمین‌های دراز، برش عرضی) */
+  /**
+   * تقسیم یک زمین به چند قسمت به نسبت دلخواه (مثلاً «1:1:1» یا «8:8:1:4»): با چند برش موازی پشت سر هم؛
+   * هر برش با جست‌وجوی دوتایی روی مساحت واقعی. سهم هر قسمت = مساحت کل × (وزن ÷ جمع وزن‌ها) با کسر دقیق.
+   */
+  function splitMulti(ringLonLat, weights, opts) {
+    opts = opts || {};
+    const ws = (weights || []).map(toFrac);
+    if (ws.length < 2 || ws.some(f => !f || fSign(f) <= 0)) return { ok: false, errors: ['نسبت‌ها باید دست‌کم دو عدد مثبت باشند (مثلاً 1:1:1)'] };
+    let sum = F0(); ws.forEach(f => { sum = fAdd(sum, f); });
+    let pre = splitPrepare(ringLonLat); if (!pre.ok) return pre;
+    const total = pre.totalArea, parts = [], warnings = [];
+    let rem = pre.ring;
+    for (let i = 0; i < ws.length; i++) {
+      const targetF = fMul(frac(Math.round(total * 1e6), 1000000), fDiv(ws[i], sum)), target = fToNumber(targetF);
+      if (i === ws.length - 1) { const a = areaM2(rem); parts.push({ ring: rem, area: a, target, share: fDiv(ws[i], sum), errorM2: a - target }); break; }
+      const p = splitPrepare(rem); if (!p.ok) return p;
+      const r = splitByArea(p, target, { azimuth: opts.azimuth, side: 'a' });
+      if (!r.ok) return r;
+      (r.warnings || []).forEach(w => warnings.push(w));
+      parts.push({ ring: r.partA, area: r.areaA, target, share: fDiv(ws[i], sum), errorM2: r.areaA - target, line: r.line });
+      rem = r.partB;
+    }
+    return { ok: true, parts, totalArea: total, azimuth: opts.azimuth, warnings, sumAreas: parts.reduce((a, p) => a + p.area, 0) };
+  }
   function principalAzimuth(ringLonLat) {
     const pre = splitPrepare(ringLonLat);
     if (!pre.ok) return null;
@@ -2048,7 +2072,7 @@
     CRS_LIST, detectCRS, sniffCrsText, toWGS84,
     areaM2, validateRing, openRing, localPlane,
     // برش زمین با خط مستقیم (تقسیم به دو قسمت با متراژ مشخص)
-    splitAxes, splitPrepare, splitOffsetRange, splitByArea, splitByOffset, splitRingByArea, principalAzimuth,
+    splitMulti, splitAxes, splitPrepare, splitOffsetRange, splitByArea, splitByOffset, splitRingByArea, principalAzimuth,
     splitDelimited, importTable, importText, importGeoJSON, importKML, buildPreview,
     SCOPES, GRADES, AGRI, FARM, RES, URBAN_USES, METHODS,
     defaultSettings, cellKey, suggestRuralGrade, featureScore, valuate, applyValuation, newParcel,
