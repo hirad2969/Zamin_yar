@@ -40,7 +40,7 @@
 - این APK **debug و بدون امضا** است؛ برای نصب مستقیم روی گوشی کافی است، ولی برای انتشار در Google Play یا کافه‌بازار باید با کلید خودتان امضا شود (`assembleRelease` + `keystore`).
 - مجوز موقعیت (GPS) در `AndroidManifest.xml` هست؛ در اولین استفاده گوشی اجازه می‌پرسد.
 - Android SDK روی تصویر `ubuntu-latest` از پیش نصب است؛ گردش‌کار فقط `platforms;android-36` و `build-tools;36.0.0` را آماده می‌کند.
-- فقط push شاخه‌ی `main` در پایان APK را با نام `zamin-yar.apk` در انتشار (Release) با برچسب `android-latest` می‌گذارد تا لینک دانلود همیشه ثابت بماند؛ PR و شاخه‌های کاری فقط Artifact می‌سازند. شماره‌ی build از `GITHUB_RUN_NUMBER` و نام نسخه به‌صورت پیش‌فرض `1.1.0` است و می‌توان با `APP_VERSION_CODE`/`APP_VERSION_NAME` تغییرش داد.
+- فقط push شاخه‌ی `main` در پایان APK را با نام `zamin-yar.apk` در انتشار (Release) با برچسب `android-latest` می‌گذارد تا لینک دانلود همیشه ثابت بماند؛ PR و شاخه‌های کاری فقط Artifact می‌سازند. شماره‌ی build از `GITHUB_RUN_NUMBER` (با سقف معتبر Android) و نام نسخه به‌صورت پیش‌فرض `1.1.0` است و می‌توان با `APP_VERSION_CODE`/`APP_VERSION_NAME` تغییرش داد.
 
 ## نسخه‌های اندروید
 حداقل: Android 7.0 (API 24) — هدف و کامپایل: API 36. روی نسخه‌های بین این دو و جدیدتر اجرا می‌شود.
