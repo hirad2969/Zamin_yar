@@ -159,6 +159,8 @@ t('صفحه‌ی تقسیم: دسته‌ها با ارزش و ضریب، حسا�
   ok(!/سناریو|اشخاص و تقسیم/.test(doc.getElementById('people-root').textContent), 'اثری از سناریو مانده است');
   const root = doc.getElementById('people-root').textContent;
   ok(doc.getElementById('cat-table'), 'جدول دسته‌ها نیست');
+  const facets = Array.from(doc.querySelectorAll('#division-selection .facet input[type=checkbox]'));
+  ok(facets.length > 0 && facets.every(x => x.checked), 'همه‌ی فیلترهای محدوده/درجه/دسته باید پیش‌فرض فعال باشند');
   has(root, 'دره گرمی'); has(root, 'پدری'); has(root, '۲٬۱۰۰٬۰۰۰٬۰۰۰'); has(root, '۸٬۰۰۰٬۰۰۰٬۰۰۰', 'ارزش دسته‌ی پدری');
   const card = doc.querySelector('#sum-table .pcard[data-pid="' + x.M.id + '"]');
   ok(card, 'کارت مصطفی نیست');
@@ -213,6 +215,16 @@ t('صفحه‌ی تقسیم: برداشتن زمین فقط از مهدی/آزا
   eq(w.App.S.parcels.find(p => p.id === x.c2).holderId, x.E.id);
   // لیست نهایی زمین‌های هر نفر
   has(doc.getElementById('res-box').textContent, 'پدری ب'); has(doc.getElementById('res-box').textContent, 'پدری ج');
+});
+
+t('صفحه‌ی تقسیم: اصلاح متراژ در فهرست نهایی روی زمین اصلی و جمع زنده اعمال می‌شود', () => {
+  const x = setup();
+  const p = w.App.S.parcels.find(q => q.id === x.b);
+  p.areaComputed = 3000; p.attrs = { residential: 'residential', agri: 'none', farmType: 'irrigated', urbanUse: 'residential' }; C.applyValuation(p, w.App.S.settings, 'آزمون متراژ نهایی'); w.App.save(); w.App.emit('state'); w.App.tab('people');
+  const row = Array.from(doc.querySelectorAll('#res-box tr')).find(tr => tr.querySelector('.l') && tr.querySelector('.l').textContent === p.name);
+  const inp = row && row.querySelector('.final-area'); ok(inp, 'ورودی متراژ فهرست نهایی نیست');
+  const old = C.currentValuation(p, w.App.S.settings).total; change(inp, '3001');
+  const now = C.currentValuation(p, w.App.S.settings).total; eq(p.areaOverride, 3001); ok(now !== old, 'تغییر متراژ در جمع اعمال نشد');
 });
 
 t('صفحه‌ی تقسیم: «سایر (+/−)» و دسته‌ی تازه با سهم‌بندی مثل پدری', () => {

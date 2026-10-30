@@ -8,7 +8,12 @@
   const S = () => App.S;
 
   App.on('init', () => { F.newParcel(true); });
-  App.on('state', () => { if (F.cur && !F.isNew && !S().parcels.some(p => p.id === F.cur.id)) F.newParcel(true); else if (F.cur) refresh(); });
+  App.on('state', () => {
+    if (!F.cur) return;
+    const latest = !F.isNew && S().parcels.find(p => p.id === F.cur.id);
+    if (F.cur && !F.isNew && !latest) F.newParcel(true);
+    else if (F.cur) { if (latest && !F.dirty) F.cur = C.clone(latest); refresh(); }
+  });
   App.on('boundary', (b) => {
     if (!F.cur || F.loading) return;
     F.cur.areaComputed = b && b.count >= 3 && b.valid ? b.area : null;
@@ -72,15 +77,10 @@
   function liveParcel() { const p = C.clone(F.cur); return p; }
   function liveV() { syncGrade(); return C.valuate(liveParcel(), S().settings); }
 
-  /* دیدِ خلاصه: اگر ذخیره‌شده و بدون تغییر ⇒ همان قیمت ثبت‌شده */
+  /* دیدِ خلاصه همیشه زنده است؛ عکسِ valuation فقط تاریخچه/سازگاری است. */
   function view() {
-    const p = F.cur;
     const lv = liveV();
-    const sv = p.valuation;
-    if (!F.isNew && sv && !F.dirty) {
-      return { fromStored: true, price: sv.pricePerM2, priceKind: sv.priceKind, total: sv.total, area: sv.area, score: sv.score, scoreMax: sv.scoreMax, status: sv.status, provisional: sv.provisional, explain: sv.explain || [], scoreLines: sv.scoreLines || [], warnings: sv.warnings || [], needs: sv.needs || [], version: sv.settingsVersion, live: lv };
-    }
-    return Object.assign({ fromStored: false, version: S().settings.version, live: lv }, lv, { price: lv.price });
+    return Object.assign({ fromStored: false, version: S().settings.version, live: lv }, lv, { price: lv.price, settingsVersion: S().settings.version });
   }
 
   /* ---------- رسم فرم ---------- */
@@ -334,10 +334,9 @@
     const stored = S().parcels.find(x => x.id === p.id);
     const ver = stored && stored.valuation && stored.valuation.settingsVersion;
     const doKeep = () => {
-      const old = S().settingsHistory.find(h => h.version === ver);
-      p.priceMode = 'frozen';
-      C.applyValuation(p, old ? old.settings : S().settings, 'ویرایش با حفظ قیمت‌های نسخه‌ی ' + ver);
-      const i = S().parcels.findIndex(x => x.id === p.id); S().parcels[i] = p; finish();
+      // اصلاح متراژ/مرز باید در کل برنامه دیده شود؛ دیگر عدد قدیمی منبع محاسبه نیست.
+      p.priceMode = 'live';
+      C.saveParcel(S(), p, 'ویرایش با محاسبه‌ی زنده‌ی قیمت و متراژ'); finish();
     };
     const doRecalc = () => { p.priceMode = 'live'; C.saveParcel(S(), p, 'ویرایش و محاسبه‌ی مجدد با نسخه‌ی ' + S().settings.version); finish(); };
     if (ver != null && ver !== S().settings.version && !F.recalcChosen) {

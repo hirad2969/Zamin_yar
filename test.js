@@ -1020,6 +1020,52 @@ t('تقسیم زنده: قاعده‌ی خرید — فقط زمین مهدی (�
   C.removePerson(st, A.id); eq(p1.holderId, null);
 });
 
+
+t('تقسیم زنده‌ی تازه: تغییر یک متر از فهرست مبنای محاسبه‌ی همه‌ی صفحات است', () => {
+  const st = C.newState(); const e = C.addEstate(st, 'پدری');
+  const p = mkParcel({ name: 'زمین جاری', scope: 'rural_outside', areaComputed: 100, estateId: e.id }); C.addParcel(st, p);
+  const a = C.addPerson(st, 'الف', 1), b = C.addPerson(st, 'ب', 1); C.setEstateEqualWeights(st, e.id, [a.id, b.id]);
+  const before = C.fToNumber(C.divisionLive(st, { parcelIds: [p.id], includeUnclassified: true }).total);
+  p.areaComputed = 101; p.valuation.area = 100; p.valuation.total = 12000000;
+  const d = C.divisionLive(st, { parcelIds: [p.id], includeUnclassified: true });
+  eq(C.fToNumber(d.total), 12120000); eq(C.fToNumber(d.cats[0].value), 12120000); ok(C.fToNumber(d.total) !== before);
+});
+t('انتخاب همه/فیلتر/تک‌زمین و حذف زمین', () => {
+  const st = C.newState(); const e = C.addEstate(st, 'منبع');
+  const a = C.newParcel({ name: 'اطراف یک', scope: 'rural_outside', grade: 'grade1', areaComputed: 100, estateId: e.id });
+  const b = C.newParcel({ name: 'داخل دو', scope: 'rural_inside', grade: 'grade2', areaComputed: 100, estateId: e.id });
+  C.addParcel(st, a); C.addParcel(st, b);
+  eq(C.divisionParcelIds(st).length, 2);
+  C.setDivisionSelection(st, { mode: 'filters', scopes: ['rural_outside'], grades: [], types: [], estates: [], includeUnclassified: true }); eq(C.divisionParcelIds(st).length, 1); eq(C.divisionParcelIds(st)[0], a.id);
+  C.setDivisionSelection(st, { mode: 'filters', scopes: [], grades: [], types: [C.divisionTypeKey(b)], estates: [], includeUnclassified: true }); eq(C.divisionParcelIds(st).length, 1); eq(C.divisionParcelIds(st)[0], b.id);
+  C.setDivisionSelection(st, { mode: 'custom', ids: [b.id], includeUnclassified: true }); eq(C.divisionParcelIds(st).length, 1); eq(C.divisionParcelIds(st)[0], b.id);
+  ok(C.removeParcel(st, b.id)); eq(st.parcels.length, 1); eq(C.divisionParcelIds(st).length, 0);
+});
+t('انتخاب صریح بدون دسته: زمین از جمع حذف ولی در گزارش قابل مشاهده می‌ماند', () => {
+  const st = C.newState(); const e = C.addEstate(st, 'منبع');
+  const classified = mkParcel({ name: 'دسته‌دار', areaComputed: 100, estateId: e.id });
+  const unc = mkParcel({ name: 'بدون دسته', areaComputed: 50, estateId: null });
+  C.addParcel(st, classified); C.addParcel(st, unc); C.addPerson(st, 'الف', 1);
+  C.setDivisionSelection(st, { mode: 'all', includeUnclassified: false });
+  const d = C.divisionLive(st, { parcelIds: C.divisionParcelIds(st), includeUnclassified: false });
+  eq(d.selectedIds.length, 1); eq(d.selectedIds[0], classified.id); eq(d.unclassified.length, 1); ok(d.warns.some(x => /دسته‌بندی‌نشده/.test(x)));
+  eq(C.fToNumber(d.total), 12000000);
+});
+t('تقسیم سهم یک شخص بین خانواده با کسر دقیق', () => {
+  const st = C.newState(); const e = C.addEstate(st, 'منبع'); const p = mkParcel({ scope: 'rural_outside', areaComputed: 100, estateId: e.id }); C.addParcel(st, p);
+  const a = C.addPerson(st, 'مصطفی', 1), b = C.addPerson(st, 'امیر', 1); C.setEstateEqualWeights(st, e.id, [a.id, b.id]);
+  C.setFamilySplitCount(st, a.id, 3); C.setFamilyMember(st, a.id, st.familySplits[a.id].members[0].id, { weight: '2' });
+  const f = C.divisionLive(st, { parcelIds: [p.id], includeUnclassified: true }).people.find(x => x.person.id === a.id).family;
+  eq(f[0].shareText, '1/2'); eq(f[1].shareText, '1/4'); eq(f[2].shareText, '1/4');
+});
+t('تقسیم رندوم فقط انتخاب فعلی را جابه‌جا می‌کند و تسویه‌ی نقدی می‌سازد', () => {
+  const st = C.newState(); const e = C.addEstate(st, 'منبع'); const ps = [1, 2, 3, 4].map((n) => { const p = mkParcel({ name: 'رندوم ' + n, scope: 'rural_outside', areaComputed: n * 100, estateId: e.id }); C.addParcel(st, p); return p; });
+  const a = C.addPerson(st, 'الف', 1), b = C.addPerson(st, 'ب', 1); C.setEstateEqualWeights(st, e.id, [a.id, b.id]);
+  const outside = C.newParcel({ name: 'خارج انتخاب', scope: 'rural_outside', areaComputed: 100, estateId: e.id }); C.addParcel(st, outside); C.setHolder(st, outside.id, a.id, true);
+  ok(!C.randomAllocate(st, [], { seed: 42 }).ok, 'انتخاب خالی نباید همه‌ی زمین‌ها را تصادفی کند');
+  const r = C.randomAllocate(st, ps.slice(0, 3).map(p => p.id), { seed: 42, attempts: 20 }); ok(r.ok); eq(outside.holderId, a.id); eq(r.assignments.length, 3); ok(r.settlement.every(x => x.amount >= 0));
+});
+
 (async () => {
   // KMZ (async)
   try {

@@ -204,3 +204,37 @@ table.t td .sub{display:block;color:var(--mut);font-size:11px;margin-top:2px}
 .prow .tag.sell{background:#fff3cd}.prow .tag.own{background:#dbe7ff}.prow .tag.free{background:#e3f6e3}
 #cat-table input.w{text-align:center}
 #cat-table td.val{font-weight:700}
+
+/* ---- انتخاب دقیق زیرمجموعه و کنترل‌های تقسیم ---- */
+.division-select-card{border:2px solid var(--pri);background:#fbfdf9}
+.select-toolbar{align-items:center;background:#eef6ea;border-radius:8px;padding:7px;margin:7px 0}
+.checkline{display:flex;align-items:center;gap:6px;margin:3px 0;cursor:pointer;line-height:1.7}
+.checkline input{accent-color:var(--pri);width:18px;height:18px;flex:0 0 auto}
+.facet-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin:8px 0}
+.facet{border:1px solid var(--line);border-radius:8px;padding:7px;background:#fff}
+.facet>b{display:block;margin-bottom:4px;color:var(--pri2)}
+.custom-picks{border:1px solid var(--line);border-radius:8px;background:#fff;padding:7px;margin-top:8px}
+.custom-picks summary{cursor:pointer;font-weight:700}
+.parcel-check-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:3px 10px;max-height:310px;overflow:auto;margin-top:6px}
+.parcel-checkline{font-size:12px;padding:2px 4px;border-bottom:1px dotted #e4e4e4}
+.parcel-checkline:hover{background:var(--sel)}
+.parcel-tick{display:flex;align-items:center;gap:3px;font-size:12px;white-space:nowrap;color:var(--pri2)}
+.parcel-tick input{accent-color:var(--pri);width:18px;height:18px}
+.parcel-area{width:110px;min-width:90px;text-align:left;direction:ltr}
+.calc-checks{margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:8px;background:#fbfcf8}
+.calc-checks .check{padding:3px 0;font-size:12px}
+.calc-checks .ok{color:var(--ok)}
+.calc-checks .bad{color:var(--err);font-weight:700}
+.family-row{border:1px solid var(--line);border-radius:8px;padding:7px;margin:6px 0;background:#fff}
+.family-row>.family-table{margin-top:7px}
+.family-table input{min-width:110px;width:100%}
+.family-mini{border-top:1px dashed var(--line);margin-top:6px;padding-top:5px;font-size:12px}
+#pick-list .prow .pn{min-width:220px}
+#pick-list .prow.is-unselected{opacity:.65}
+@media(max-width:900px){
+  .facet-grid{grid-template-columns:1fr}
+  .parcel-check-grid{grid-template-columns:1fr;max-height:260px}
+  .parcel-area{width:120px}
+  .select-toolbar{align-items:flex-start;flex-direction:column}
+}
+.final-area{width:110px;min-width:86px;text-align:left;direction:ltr}

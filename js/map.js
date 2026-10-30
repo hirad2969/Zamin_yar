@@ -11,8 +11,17 @@
 
   App.on('init', function () {
     const map = M.map = L.map('map', { zoomControl: true, worldCopyJump: false, doubleClickZoom: false }).setView([32.5, 54], 6);
-    M.SAT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+    // دو نشانی رسمی Esri: بعضی شبکه‌ها یکی از hostها را می‌بندند. تشخیص خودکار
+    // نیز هر دو را امتحان می‌کند؛ بنابراین شکست یک host نباید ابزار را از کار بیندازد.
+    M.SAT_URLS = [
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+    ];
+    M.SAT_URL = M.SAT_URLS[0]; M.satFallbackUsed = false;
     const sat = L.tileLayer(M.SAT_URL, { maxZoom: 19, attribution: 'تصاویر ماهواره‌ای © Esri, Maxar, Earthstar Geographics' });
+    sat.on('tileerror', () => {
+      if (!M.satFallbackUsed && M.SAT_URLS[1]) { M.satFallbackUsed = true; M.SAT_URL = M.SAT_URLS[1]; sat.setUrl(M.SAT_URL); }
+    });
     const street = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' });
     const blank = L.layerGroup();
     [sat, street].forEach(t => {
@@ -344,10 +353,11 @@
     App.S.parcels.forEach(p => {
       if (!p.geometry || !p.geometry.ring || p.geometry.ring.length < 3) return;
       if (M.editingId === p.id) return; // در حال ویرایش: از لایه‌ی ترسیم نمایش داده می‌شود
-      const st = p.valuation && p.valuation.status;
+      const v = C.currentValuation ? C.currentValuation(p, App.S.settings) : (p.valuation || {});
+      const st = v.status;
       const col = st === 'قطعی' ? '#2e7d32' : st === 'موقت' ? '#f9a825' : '#c62828';
       const poly = L.polygon(p.geometry.ring.map(ll), { color: col, weight: 3, fillOpacity: 0.18 }).addTo(savedLayer);
-      poly.bindTooltip('<div dir="rtl"><b>' + App.esc(p.name || 'بدون نام') + '</b><br>' + App.area(p.valuation && p.valuation.area) + '<br>' + App.toman(p.valuation && p.valuation.total) + '</div>', { className: 'fa', sticky: true });
+      poly.bindTooltip('<div dir="rtl"><b>' + App.esc(p.name || 'بدون نام') + '</b><br>' + App.area(v.area) + '<br>' + App.toman(v.total) + '</div>', { className: 'fa', sticky: true });
       poly.on('click', () => { App.tab('map'); App.form.open(p.id, true); });
       savedById[p.id] = poly;
     });

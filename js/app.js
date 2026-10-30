@@ -15,7 +15,17 @@
     if (!Array.isArray(s.estates)) s.estates = [];
     if (!Array.isArray(s.persons)) s.persons = [];
     if (!s.house) s.house = { amount: '', receivers: [], payer: '' };
+    if (!s.house.receivers) s.house.receivers = [];
     if (!s.adjust) s.adjust = {};
+    if (!s.familySplits || typeof s.familySplits !== 'object') s.familySplits = {};
+    if (!s.divisionSelection || typeof s.divisionSelection !== 'object') s.divisionSelection = { mode: 'all', scopes: [], grades: [], types: [], estates: [], ids: null, excludedIds: [], includeUnclassified: true };
+    if (!Array.isArray(s.divisionSelection.scopes)) s.divisionSelection.scopes = [];
+    if (!Array.isArray(s.divisionSelection.grades)) s.divisionSelection.grades = [];
+    if (!Array.isArray(s.divisionSelection.types)) s.divisionSelection.types = [];
+    if (!Array.isArray(s.divisionSelection.estates)) s.divisionSelection.estates = [];
+    if (!Array.isArray(s.divisionSelection.excludedIds)) s.divisionSelection.excludedIds = [];
+    if (s.divisionSelection.includeUnclassified == null) s.divisionSelection.includeUnclassified = true;
+    if (!('randomDivision' in s)) s.randomDivision = null;
     (s.scenarios || []).forEach(sc => { if (sc && !sc.priceBasis) sc.priceBasis = { mode: 'snapshot', level: 'base', version: sc.settingsVersion, factor: 1, ignoreOverride: false }; });
     return s;
   };
