@@ -64,12 +64,19 @@
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && AD.active) AD.cancel(); });
   });
 
-  function loadTile(z, x, y) {
+  function loadOneTile(url, z, x, y) {
     return new Promise((res) => {
       const im = new Image(); im.crossOrigin = 'anonymous';
-      im.onload = () => res(im); im.onerror = () => res(null);
-      im.src = M.SAT_URL.replace('{z}', z).replace('{y}', y).replace('{x}', x);
+      let done = false; const finish = (v) => { if (done) return; done = true; res(v); };
+      const timer = setTimeout(() => finish(null), 9000);
+      im.onload = () => { clearTimeout(timer); finish(im); };
+      im.onerror = () => { clearTimeout(timer); finish(null); };
+      im.src = url.replace('{z}', z).replace('{y}', y).replace('{x}', x);
     });
+  }
+  function loadTile(z, x, y) {
+    const urls = M.SAT_URLS && M.SAT_URLS.length ? M.SAT_URLS : [M.SAT_URL];
+    return loadOneTile(urls[0], z, x, y).then(im => im || (urls[1] ? loadOneTile(urls[1], z, x, y) : null));
   }
   const tick = () => new Promise(r => setTimeout(r, 30));
 
@@ -88,6 +95,14 @@
     let img;
     try { img = cx.getImageData(0, 0, WIN, WIN); } catch (e) { throw new Error('cors'); }
     return { img, x0, y0 };
+  }
+
+  function fallbackRingByArea(latlng, area) {
+    // وقتی سرویس تصویر در دسترس نیست، با متراژ معلوم یک کادر تقریبی می‌سازیم؛
+    // این جای تشخیص تصویری نیست اما کاربر را متوقف نمی‌کند و مرز بعداً قابل ویرایش است.
+    const side = Math.sqrt(area), lat = latlng.lat, c = Math.max(0.15, Math.cos(lat * Math.PI / 180));
+    const dLat = side / 111320, dLon = side / (111320 * c), lo = latlng.lng - dLon / 2, la = lat - dLat / 2;
+    return [[lo, la], [lo + dLon, la], [lo + dLon, la + dLat], [lo, la + dLat]];
   }
 
   async function run(latlng) {
@@ -114,7 +129,16 @@
       }
     } catch (e) {
       busy = false;
-      const msg = /cors/.test(e.message) ? 'سرویس نقشه اجازه‌ی خواندن تصویر برای تحلیل را نداد.' : /tiles/.test(e.message) ? 'کاشی‌های نقشه بارگذاری نشد (اینترنت یا سرویس نقشه در دسترس نیست). تشخیص خودکار نیازمند اینترنت است.' : 'خطا در تحلیل: ' + e.message;
+      const est = hintM2();
+      if ((/cors|tiles/.test(e.message)) && est) {
+        const ring = fallbackRingByArea(latlng, est);
+        M.setBoundary(ring, { source: 'auto', meta: { method: 'ساخت کادر بر اساس متراژ تخمینی؛ کاشی ماهواره‌ای در دسترس نبود', estimateM2: est, note: 'تقریبی و نیازمند اصلاح دستی' }, fit: false });
+        AD.active = false; if (M.map) M.map.getContainer().style.cursor = '';
+        hideBar(); M.map.fitBounds(L.latLngBounds(ring.map(ll)), { maxZoom: 19, padding: [60, 60] });
+        App.toast('کاشی ماهواره‌ای خوانده نشد؛ کادر تقریبی بر اساس متراژ ساخته شد. گوشه‌ها را با مرز واقعی اصلاح و ذخیره کنید.', 'warn');
+        return;
+      }
+      const msg = /cors/.test(e.message) ? 'سرویس نقشه اجازه‌ی خواندن تصویر برای تحلیل را نداد.' : /tiles/.test(e.message) ? 'کاشی‌های ماهواره‌ای بارگذاری نشد. متراژ تخمینی را وارد کنید تا کادر تقریبی ساخته شود، یا مرز را دستی/GPS رسم کنید.' : 'خطا در تحلیل: ' + e.message;
       App.toast(msg, 'err'); waiting(splitHint()); return;
     }
     busy = false;
