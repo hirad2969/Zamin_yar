@@ -46,6 +46,7 @@
     r.appendChild(el('div', { class: 'note', text: 'همه‌ی عددها هر بار از متراژ جاری و نرخ جاری هر زمین با ماشین‌حساب دقیق به‌دست می‌آیند. «همه» به‌صورت پیش‌فرض فعال است؛ برای محاسبه‌ی جداگانه می‌توانید فیلتر بزنید یا حتی یک زمین را بردارید.' }));
     const strip = el('div', { id: 'strip-box', class: 'strip' });
     const bSelect = el('div', { class: 'card division-select-card', id: 'division-selection' });
+    const bAuto = el('div', { class: 'card auto-policy-card', id: 'auto-box' });
     const bCat = el('div', { class: 'card', id: 'cat-box' });
     const bHouse = el('div', { class: 'card', id: 'house-box' });
     const bPeople = el('div', { class: 'card', id: 'sum-box' });
@@ -57,7 +58,7 @@
     let data = null;
     const rows = {};
 
-    const refresh = () => { save(); data = ev(); drawStrip(); drawSelection(); drawCat(); drawPeople(); drawHouse(); drawPick(); drawRes(); drawFamily(); markRows(); };
+    const refresh = () => { save(); data = ev(); drawStrip(); drawSelection(); drawAuto(); drawCat(); drawPeople(); drawHouse(); drawPick(); drawRes(); drawFamily(); markRows(); };
     const full = () => { save(); render(); };
     function editFinalArea(p, raw) {
       // divisionLive برای ایمنی، زمین‌های دست هر شخص را به شکل shallow copy
@@ -179,6 +180,59 @@
       }, 'تقسیم شود');
     }
 
+    function policyText(policy) { return C.ALLOCATION_MODES && C.ALLOCATION_MODES[policy.mode] ? C.ALLOCATION_MODES[policy.mode] : policy.mode; }
+    function allocationSummary(plan) {
+      const rows = (plan.targets || []).map(x => '<tr><td class="l">' + App.esc(x.name) + '</td><td>' + App.n(C.fToNumber(C.toFrac(x.share)) * 100, 2) + '٪</td><td>' + money(C.toFrac(x.landTarget)) + '</td><td>' + money(C.toFrac(x.finalTarget)) + '</td></tr>').join('');
+      const cash = (plan.cash || []).map(x => '<tr><td class="l">' + App.esc(x.name) + '</td><td class="' + (x.amount >= 0 ? 'pos' : 'neg') + '">' + (x.amount >= 0 ? 'دریافت ' : 'پرداخت ') + App.toman(Math.abs(x.amount)) + '</td></tr>').join('');
+      const shared = (plan.coownerships || []).map(x => x.parcelName).join('، ');
+      return '<div class="box info"><b>پیشنهاد فقط بر پایه‌ی محاسبه‌ی جاری است.</b><br>امتیاز اختلاف زمینی: ' + App.toman(plan.score || 0) + '</div>' + (shared ? '<div class="box warn"><b>هشدار مشاع:</b> «' + App.esc(shared) + '» فقط با تأیید همین دکمه ثبت می‌شود؛ سهم‌های مشاع در خروجی هر شخص جداگانه نمایش داده می‌شوند.</div>' : '') +
+        '<h4>هدف هر شخص</h4><table class="t"><thead><tr><th class="l">شخص</th><th>نسبت</th><th>هدف زمین</th><th>اعتبار نهایی</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+        '<h4>تسویه‌ی پیشنهادی</h4><table class="t"><thead><tr><th class="l">شخص</th><th>مانده</th></tr></thead><tbody>' + cash + '</tbody></table>';
+    }
+    function runAutomatic(policy) {
+      policy = C.normalizeAllocationPolicy(st, policy); st.allocationPolicy = policy; save();
+      const ids = selectedIds(); if (!ids.length) { App.toast('ابتدا زمین‌های تقسیم را انتخاب کنید.', 'warn'); return; }
+      const plan = C.automaticAllocationPlan(st, { selectedIds: ids, policy });
+      if (!plan.ok) { App.modal({ title: 'تخصیص خودکار انجام نشد', body: el('div', null, (plan.errors || []).map(x => el('div', { class: 'box err', text: x }))) }); return; }
+      if (plan.requiresInput) {
+        const q = plan.request;
+        const body = el('div', null, [el('div', { class: 'box warn', text: q.message + ' «' + q.parcelName + '» — ارزش جاری ' + money(C.toFrac(q.value)) + ' تومان — مساحت ' + App.area(q.area) }), el('div', { class: 'note', text: q.canPhysical ? 'اگر مرز معتبر باشد، درصدی و متری با برش واقعی انجام می‌شود؛ در غیر این صورت تسویه‌ی نقدی پیشنهاد می‌شود.' : 'برای این زمین مرز معتبر وجود ندارد؛ فقط تسویه‌ی نقدی قابل ثبت است.' }), el('table', { class: 't' }, [el('thead', null, el('tr', null, ['شخص', 'قسمت پیشنهادی'].map(h => el('th', { text: h })))), el('tbody', null, (q.portions || []).map(x => el('tr', null, [el('td', { class: 'l', text: x.personName }), el('td', { text: money(C.toFrac(x.value)) + ' تومان — ' + App.n(C.fToNumber(C.toFrac(x.share)) * 100, 2) + '٪' })])))] )]);
+        const choose = (mode, close) => { const next = C.clone(policy); next.resolutions = Object.assign({}, policy.resolutions || {}, { [q.parcelId]: mode }); close(); setTimeout(() => runAutomatic(next), 0); };
+        const buttons = q.canPhysical ? [{ label: 'تقسیم متری', onClick: close => choose('area', close) }, { label: 'تقسیم درصدی', onClick: close => choose('percent', close) }, { label: 'تسویه‌ی نقدی', cls: 'sec2', onClick: close => choose('cash', close) }] : [{ label: 'تسویه‌ی نقدی', onClick: close => choose('cash', close) }];
+        if ((q.options || []).indexOf('coownership') >= 0) buttons.push({ label: 'مشاع — تأیید نهایی لازم است', cls: 'dng', onClick: close => choose('coownership', close) });
+        App.modal({ title: 'انتخاب روش برای ملک بزرگ', wide: true, body, buttons: buttons.concat([{ label: 'لغو', cls: 'sec2' }]) }); return;
+      }
+      const msg = allocationSummary(plan) + (plan.warnings || []).map(x => '<div class="box warn">' + App.esc(x) + '</div>').join('');
+      App.confirm('پیشنهاد تخصیص خودکار — ' + policyText(policy), msg, () => { const out = C.applyAutomaticAllocation(st, plan); if (!out.ok) { App.toast((out.errors || ['ثبت تخصیص ناموفق بود']).join('؛ '), 'err'); return; } st.allocationPolicy = policy; save(); App.emit('state'); App.toast('تخصیص خودکار با ثبت حسابرسی شد', 'ok'); }, 'ثبت تخصیص');
+    }
+    function drawAuto() {
+      bAuto.innerHTML = ''; bAuto.appendChild(el('h3', { style: 'margin-top:0', text: '۲) تخصیص خودکار حرفه‌ای و قابل حسابرسی' }));
+      bAuto.appendChild(el('div', { class: 'note', text: 'این بخش ابتدا پیشنهاد می‌سازد و تا تأیید شما هیچ زمینی را جابه‌جا نمی‌کند. ابتدا تقسیمات موجود حفظ می‌شوند؛ هدف نقدی هر سهم از محاسبه‌ی زنده به‌دست می‌آید. اگر یک ملک برای چند سهم بزرگ باشد، برنامه قبل از ثبت روش متری/درصدی/نقدی را می‌پرسد.' }));
+      const p = C.normalizeAllocationPolicy(st, st.allocationPolicy || {}); st.allocationPolicy = p;
+      const mode = el('select', { id: 'allocation-mode', onchange: e => { p.mode = e.target.value; save(); drawAuto(); } }, Object.keys(C.ALLOCATION_MODES || {}).map(k => el('option', { value: k, text: C.ALLOCATION_MODES[k], selected: p.mode === k ? true : null })));
+      const split = el('select', { id: 'allocation-split-mode', onchange: e => { p.splitMode = e.target.value; p.indivisible = e.target.value === 'cash' ? 'cash_only' : 'physical_then_cash'; save(); } }, Object.keys(C.ALLOCATION_SPLITS || {}).map(k => el('option', { value: k, text: C.ALLOCATION_SPLITS[k], selected: p.splitMode === k ? true : null })));
+      const keep = el('input', { type: 'checkbox', checked: p.preserveExisting ? true : null, onchange: e => { p.preserveExisting = e.target.checked; save(); } });
+      const co = el('input', { type: 'checkbox', checked: p.allowCoownership ? true : null, onchange: e => { p.allowCoownership = e.target.checked; save(); } });
+      bAuto.appendChild(el('div', { class: 'row auto-fields' }, [el('label', { class: 'f' }, [el('span', { text: 'ملاک تخصیص' }), mode]), el('label', { class: 'f' }, [el('span', { text: 'روش ملک بزرگ' }), split]), el('label', { class: 'checkline' }, [keep, 'حفظ تقسیمات ثبت‌شده و فقط تکمیل باقی‌مانده']), el('label', { class: 'checkline' }, [co, 'مشاع فقط به‌عنوان آخرین راه و با تأیید جداگانه'])]));
+      if (p.mode === 'equal_mix') {
+        const names = { scope: 'محدوده/داخل و اطراف روستا', grade: 'درجه', type: 'نوع/کاربری', special: 'ویژه/معمولی', estate: 'دسته‌ی اموال' };
+        const mixKids = [el('b', { text: 'سطوحی که باید بین اشخاص متوازن شود' })];
+        Object.keys(names).forEach(k => mixKids.push(el('label', { class: 'checkline' }, [el('input', { type: 'checkbox', checked: p.mixKeys.indexOf(k) >= 0 ? true : null, onchange: e => { p.mixKeys = e.target.checked ? p.mixKeys.concat(p.mixKeys.indexOf(k) < 0 ? [k] : []) : p.mixKeys.filter(x => x !== k); save(); } }), names[k]])));
+        bAuto.appendChild(el('div', { class: 'facet mix-policy' }, mixKids));
+      }
+      if (p.mode === 'law_ratio' || p.mode === 'custom') {
+        const rule = st.inheritanceRule || (st.inheritanceRule = C.defaultInheritanceRule());
+        const relNames = { son: 'پسر', daughter: 'دختر', spouse: 'همسر', father: 'پدر', mother: 'مادر', other: 'سایر' };
+        bAuto.appendChild(el('div', { class: 'box warn', text: p.mode === 'law_ratio' ? 'الگوی حقوقی فقط نسبت‌های ثبت‌شده را وارد موتور می‌کند؛ قبل از ثبت، وراث، دیون، وصیت و jurisdiction را با کارشناس حقوقی کنترل کنید.' : 'قانون سفارشی است؛ نسبت هر شخص را صریح وارد کنید.' }));
+        bAuto.appendChild(el('div', { class: 'row' }, [el('label', { class: 'f' }, [el('span', { text: 'حوزه‌ی الگو' }), el('select', { onchange: e => { rule.jurisdiction = e.target.value; save(); } }, [el('option', { value: 'iran_shia', text: 'ایران — شیعه (نیازمند بازبینی)', selected: rule.jurisdiction === 'iran_shia' ? true : null }), el('option', { value: 'custom', text: 'سفارشی', selected: rule.jurisdiction === 'custom' ? true : null })])]), el('label', { class: 'checkline' }, [el('input', { type: 'checkbox', checked: rule.legalReviewed ? true : null, onchange: e => { rule.legalReviewed = e.target.checked; save(); } }), 'بازبینی حقوقی انجام شد'])]));
+        const tb = el('tbody'); st.persons.forEach(person => { const wi = el('input', { type: 'text', dir: 'ltr', value: p.personWeights[person.id] == null ? (rule.ratios[person.id] || '') : p.personWeights[person.id], placeholder: 'مثلاً ۲ یا ۱/۲', onchange: e => { p.personWeights[person.id] = e.target.value; rule.ratios[person.id] = e.target.value; rule.relations[person.id] = rule.relations[person.id] || 'other'; save(); } }); const rs = el('select', { onchange: e => { rule.relations[person.id] = e.target.value; save(); } }, Object.keys(relNames).map(k => el('option', { value: k, text: relNames[k], selected: (rule.relations[person.id] || 'other') === k ? true : null }))); tb.appendChild(el('tr', null, [el('td', { class: 'l', text: person.name }), el('td', null, wi), el('td', null, rs)])); });
+        bAuto.appendChild(el('table', { class: 't law-table' }, [el('thead', null, el('tr', null, ['شخص', 'وزن/نسبت', 'رابطه برای گزارش'].map(h => el('th', { text: h })))), tb]));
+        if (p.mode === 'law_ratio') bAuto.appendChild(el('button', { class: 'btn sm sec2', text: 'پیشنهاد ساده‌ی فرزندان: پسر ۲، دختر ۱', onclick: () => { const rels = st.persons.map(x => rule.relations[x.id]); if (!rels.length || rels.some(x => x !== 'son' && x !== 'daughter') || !rels.includes('son') || !rels.includes('daughter')) { App.toast('این پیشنهاد فقط وقتی فعال است که همه‌ی اشخاص رابطه‌ی پسر/دختر داشته باشند؛ همسر/والدین باید با کارشناس حقوقی بررسی شوند.', 'warn'); return; } st.persons.forEach(x => { const w = rule.relations[x.id] === 'son' ? '2' : '1'; p.personWeights[x.id] = w; rule.ratios[x.id] = w; }); save(); drawAuto(); } }));
+        bAuto.appendChild(el('div', { class: 'note', text: 'دیون و وصیت را فعلاً در «خانه/سایر (+/−)» وارد کنید؛ در مرحله‌ی بعد به ورودی‌های رسمی قانون ارث تبدیل می‌شوند. برنامه در این نسخه حکم حقوقی صادر نمی‌کند.' }));
+      }
+      bAuto.appendChild(el('button', { class: 'btn', id: 'auto-allocate', text: '🧮 ساخت پیشنهاد تخصیص برای زمین‌های انتخابی', onclick: () => runAutomatic(C.clone(p)) }));
+      if (st.allocationRun) bAuto.appendChild(el('div', { class: 'note' }, ['آخرین ثبت تخصیص: ', el('b', { text: policyText(st.allocationRun) }), ' — ', App.fmtDate(st.allocationRun.at), '؛ با تغییر متراژ/نرخ باید پیشنهاد را دوباره بررسی کنید.']));
+    }
     function drawCat() {
       bCat.innerHTML = '';
       bCat.appendChild(el('h3', { style: 'margin-top:0', text: '۲) دسته‌ها و سهم هر نفر' }));
@@ -295,14 +349,15 @@
       const seller = C.sellerId(st), qq = (ui.q || '').trim(), selected = new Set(selectedIds().map(String));
       st.parcels.forEach(p => {
         const rw = rows[p.id]; if (!rw) return;
-        const cur = C.holderOfParcel(st, p);
+        const cur = C.holderOfParcel(st, p), co = C.coOwnersOfParcel ? C.coOwnersOfParcel(st, p) : [];
         rw.hSel.innerHTML = '';
         [['', '— آزاد (دست هیچ‌کس) —']].concat(st.persons.map(x => [x.id, x.name])).forEach(o => { const op = el('option', { value: o[0], text: o[1] }); if (o[0] && !C.canTake(st, p.id, o[0]).ok) { op.disabled = true; op.textContent = o[1] + ' (ممکن نیست)'; } rw.hSel.appendChild(op); });
-        rw.hSel.value = cur; rw.check.checked = selected.has(String(p.id));
-        const buyable = !cur || cur === seller, tag = rw.el.querySelector('.tag');
-        tag.textContent = cur ? (cur === seller ? 'دست پرداخت‌کننده — قابل برداشتن' : 'دست ' + pName(cur)) : 'آزاد'; tag.className = 'tag ' + (cur ? (buyable ? 'sell' : 'own') : 'free');
+        rw.hSel.value = cur; rw.hSel.disabled = co.length > 0; rw.check.checked = selected.has(String(p.id));
+        const buyable = !cur && !co.length || cur === seller, tag = rw.el.querySelector('.tag');
+        if (co.length) { tag.textContent = 'مشاع: ' + co.map(o => pName(o.personId) + ' ' + fa(C.fText(o.share))).join('، '); tag.className = 'tag own'; }
+        else { tag.textContent = cur ? (cur === seller ? 'دست پرداخت‌کننده — قابل برداشتن' : 'دست ' + pName(cur)) : 'آزاد'; tag.className = 'tag ' + (cur ? (buyable ? 'sell' : 'own') : 'free'); }
         const v = liveV(p); rw.el.querySelector('.pv').textContent = App.n(v.total, 0); rw.el.querySelector('.pn .note').textContent = ' ' + App.n(v.area, 1) + ' م² × ' + App.n(v.price != null ? v.price : v.pricePerM2, 0) + ' = ';
-        let ok = true; if (qq && (p.name || '').indexOf(qq) < 0) ok = false; if (ui.flt === 'selected' && !selected.has(String(p.id))) ok = false; if (ui.flt === 'free' && cur) ok = false; if (ui.flt === 'buyable' && !buyable) ok = false; if (ui.flt.indexOf('p:') === 0 && cur !== ui.flt.slice(2)) ok = false;
+        let ok = true; if (qq && (p.name || '').indexOf(qq) < 0) ok = false; if (ui.flt === 'selected' && !selected.has(String(p.id))) ok = false; if (ui.flt === 'free' && (cur || co.length)) ok = false; if (ui.flt === 'buyable' && !buyable) ok = false; if (ui.flt.indexOf('p:') === 0 && cur !== ui.flt.slice(2)) ok = false;
         rw.el.style.display = ok ? '' : 'none'; if (rw.dSel.value !== (p.estateId || '')) rw.dSel.value = p.estateId || '';
       });
     }
@@ -331,7 +386,7 @@
         w.appendChild(el('h4', { style: 'margin:0 0 6px', text: x.person.name + ' — ' + App.n(x.held.length, 0) + ' قطعه، ' + App.n(x.heldArea, 1) + ' م²، ارزش ' + money(x.heldValue) + ' تومان (' + App.n(pct, 2) + '٪ از کل)' }));
         w.appendChild(el('div', { class: 'row' }, [el('button', { class: 'btn sm sec2', text: 'دانلود فایل ' + x.person.name, onclick: () => downloadPerson(x) })]));
         const lands = (x.held || []).slice().sort((a, b) => (liveV(b).total || 0) - (liveV(a).total || 0));
-        if (lands.length) w.appendChild(el('table', { class: 't' }, [el('thead', null, el('tr', null, ['#', 'زمین', 'دسته', 'مساحت جاری/اصلاح', 'قیمت هر متر', 'ارزش جاری'].map(h => el('th', { text: h })))), el('tbody', null, lands.map((p, i) => { const v = liveV(p); const ai = el('input', { class: 'final-area', type: 'text', dir: 'ltr', inputmode: 'decimal', value: v.area == null ? '' : v.area, title: 'خالی = مساحت هندسه', onchange: e => editFinalArea(p, e.target.value) }); return el('tr', null, [el('td', { text: App.n(i + 1, 0) }), el('td', { class: 'l', text: p.name }), el('td', { text: catName(p) }), el('td', null, ai), el('td', { text: App.n(v.price != null ? v.price : v.pricePerM2, 0) }), el('td', { text: App.n(v.total, 0) })]); }))]));
+        if (lands.length) w.appendChild(el('table', { class: 't' }, [el('thead', null, el('tr', null, ['#', 'زمین', 'دسته', 'مساحت جاری/اصلاح', 'قیمت هر متر', 'ارزش جاری'].map(h => el('th', { text: h })))), el('tbody', null, lands.map((p, i) => { const v = liveV(p), sh = p.coOwnerShare ? C.toFrac(p.coOwnerShare) : null, shownArea = sh ? v.area * C.fToNumber(sh) : v.area, shownTotal = sh ? v.total * C.fToNumber(sh) : v.total; const ai = el('input', { class: 'final-area', type: 'text', dir: 'ltr', inputmode: 'decimal', value: shownArea == null ? '' : shownArea, title: sh ? 'مساحت کل زمین مشاع است؛ سهم با کسر دقیق نمایش داده می‌شود' : 'خالی = مساحت هندسه', disabled: sh ? true : null, onchange: e => editFinalArea(p, e.target.value) }); return el('tr', null, [el('td', { text: App.n(i + 1, 0) }), el('td', { class: 'l', text: p.name + (sh ? ' — مشاع ' + fa(C.fText(sh)) : '') }), el('td', { text: catName(p) }), el('td', null, ai), el('td', { text: App.n(v.price != null ? v.price : v.pricePerM2, 0) }), el('td', { text: App.n(shownTotal, 0) })]); }))]));
         else w.appendChild(el('div', { class: 'note', text: 'زمینی دستش نیست.' }));
         const v = R(x.remaining); w.appendChild(el('div', { class: v < 0 ? 'neg' : 'pos', text: 'اعتبار ' + money(x.credit) + ' − زمین‌ها ' + money(x.heldValue) + ' = ' + (v < 0 ? 'کسری ' : 'مانده ') + money(C.fAbs(x.remaining)) + ' تومان' }));
         bRes.appendChild(w);
@@ -387,15 +442,15 @@
     }
 
     data = ev();
-    drawStrip(); drawSelection(); drawCat(); drawHouse(); drawPeople(); drawPick(); drawRes(); drawFamily(); drawCode(); drawPersons(); markRows();
-    [strip, bSelect, bCat, bHouse, bPeople, bPick, bRes, bFamily, bCode, bPer].forEach(b => r.appendChild(b));
+    drawStrip(); drawSelection(); drawAuto(); drawCat(); drawHouse(); drawPeople(); drawPick(); drawRes(); drawFamily(); drawCode(); drawPersons(); markRows();
+    [strip, bSelect, bAuto, bCat, bHouse, bPeople, bPick, bRes, bFamily, bCode, bPer].forEach(b => r.appendChild(b));
   }
 
   function textOf(d) {
     const L = ['ارزش جاری انتخاب: ' + money(d.total) + ' تومان', ''];
     d.cats.forEach(c => L.push('دسته‌ی ' + c.name + ': ' + c.count + ' زمین — ' + money(c.value) + ' تومان'));
     L.push('');
-    d.people.forEach(x => { L.push('■ ' + x.person.name + ' — حق: ' + money(x.entitlement) + ' | خانه: ' + signed(x.house) + ' | سایر: ' + signed(x.adjust) + ' | اعتبار: ' + money(x.credit)); x.held.forEach((p, i) => { const v = liveV(p); L.push('  ' + App.n(i + 1, 0) + ') ' + p.name + ' — ' + App.n(v.area, 1) + ' م² — ' + App.n(v.total, 0) + ' تومان'); }); L.push('  جمع زمین‌ها: ' + money(x.heldValue) + ' — ' + (R(x.remaining) < 0 ? 'کسری: ' : 'مانده: ') + money(C.fAbs(x.remaining)) + ' تومان', ''); });
+    d.people.forEach(x => { L.push('■ ' + x.person.name + ' — حق: ' + money(x.entitlement) + ' | خانه: ' + signed(x.house) + ' | سایر: ' + signed(x.adjust) + ' | اعتبار: ' + money(x.credit)); x.held.forEach((p, i) => { const v = liveV(p), sh = p.coOwnerShare ? C.toFrac(p.coOwnerShare) : null, k = sh ? C.fToNumber(sh) : 1; L.push('  ' + App.n(i + 1, 0) + ') ' + p.name + (sh ? ' — مشاع ' + fa(C.fText(sh)) : '') + ' — ' + App.n(v.area * k, 1) + ' م² — ' + App.n(v.total * k, 0) + ' تومان'); }); L.push('  جمع زمین‌ها: ' + money(x.heldValue) + ' — ' + (R(x.remaining) < 0 ? 'کسری: ' : 'مانده: ') + money(C.fAbs(x.remaining)) + ' تومان', ''); });
     if (d.free.length) L.push('آزاد: ' + d.free.map(p => p.name).join('، '));
     return L.join('\n');
   }
@@ -405,12 +460,12 @@
     const E = App.esc; let h = '<h1>تقسیم زمین‌ها</h1><div class="note">ارزش جاری انتخاب: ' + money(d.total) + ' تومان — ' + E(selectionLabel()) + '</div>';
     h += '<h2>دسته‌ها</h2><table><thead><tr><th class="l">دسته</th><th>زمین</th><th>متر</th><th>ارزش (تومان)</th></tr></thead><tbody>' + d.cats.map(c => '<tr><td class="l">' + E(c.name) + '</td><td>' + App.n(c.count, 0) + '</td><td>' + App.n(c.area, 1) + '</td><td>' + money(c.value) + '</td></tr>').join('') + '</tbody></table>';
     h += '<h2>حساب هر نفر</h2><table><thead><tr><th class="l">شخص</th><th>حق زمین‌ها</th><th>خانه</th><th>سایر</th><th>اعتبار</th><th>ارزش زمین‌های دستش</th><th>مانده/کسری</th></tr></thead><tbody>' + d.people.map(x => '<tr><td class="l">' + E(x.person.name) + '</td><td>' + money(x.entitlement) + '</td><td>' + signed(x.house) + '</td><td>' + signed(x.adjust) + '</td><td>' + money(x.credit) + '</td><td>' + money(x.heldValue) + '</td><td>' + (R(x.remaining) < 0 ? 'کسری ' : 'مانده ') + money(C.fAbs(x.remaining)) + '</td></tr>').join('') + '</tbody></table>';
-    d.people.forEach(x => { h += '<div class="person"><h3>' + E(x.person.name) + ' — ' + money(x.heldValue) + ' تومان، ' + App.n(x.heldArea, 1) + ' م²</h3>'; h += x.held.length ? '<table><thead><tr><th>#</th><th class="l">زمین</th><th>مساحت جاری</th><th>قیمت هر متر</th><th>ارزش جاری</th></tr></thead><tbody>' + x.held.map((p, i) => { const v = liveV(p); return '<tr><td>' + App.n(i + 1, 0) + '</td><td class="l">' + E(p.name) + '</td><td>' + App.n(v.area, 1) + '</td><td>' + App.n(v.price != null ? v.price : v.pricePerM2, 0) + '</td><td>' + App.n(v.total, 0) + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="note">زمینی ندارد.</div>'; if (x.family && x.family.length) h += '<div class="note"><b>خانواده:</b> ' + x.family.map(f => E(f.name) + ' ' + fa(f.sharePct) + '٪ = ' + money(f.value)).join('؛ ') + '</div>'; h += '</div>'; });
+    d.people.forEach(x => { h += '<div class="person"><h3>' + E(x.person.name) + ' — ' + money(x.heldValue) + ' تومان، ' + App.n(x.heldArea, 1) + ' م²</h3>'; h += x.held.length ? '<table><thead><tr><th>#</th><th class="l">زمین</th><th>مساحت جاری</th><th>قیمت هر متر</th><th>ارزش جاری</th></tr></thead><tbody>' + x.held.map((p, i) => { const v = liveV(p), sh = p.coOwnerShare ? C.toFrac(p.coOwnerShare) : null, k = sh ? C.fToNumber(sh) : 1; return '<tr><td>' + App.n(i + 1, 0) + '</td><td class="l">' + E(p.name) + (sh ? ' — مشاع ' + E(fa(C.fText(sh))) : '') + '</td><td>' + App.n(v.area * k, 1) + '</td><td>' + App.n(v.price != null ? v.price : v.pricePerM2, 0) + '</td><td>' + App.n(v.total * k, 0) + '</td></tr>'; }).join('') + '</tbody></table>' : '<div class="note">زمینی ندارد.</div>'; if (x.family && x.family.length) h += '<div class="note"><b>خانواده:</b> ' + x.family.map(f => E(f.name) + ' ' + fa(f.sharePct) + '٪ = ' + money(f.value)).join('؛ ') + '</div>'; h += '</div>'; });
     return h;
   }
   function csvForPerson(x) {
     const lines = [['شخص', 'زمین', 'دسته', 'مساحت جاری مترمربع', 'قیمت هر متر تومان', 'ارزش جاری تومان', 'سهم']];
-    (x.held || []).forEach(p => { const v = liveV(p); lines.push([x.person.name, p.name, C.findEstate(S(), p.estateId) ? C.findEstate(S(), p.estateId).name : C.NO_ESTATE_NAME, v.area == null ? '' : v.area, v.price != null ? v.price : (v.pricePerM2 || ''), v.total == null ? '' : v.total, '۱۰۰٪']); });
+    (x.held || []).forEach(p => { const v = liveV(p), sh = p.coOwnerShare ? C.toFrac(p.coOwnerShare) : null, k = sh ? C.fToNumber(sh) : 1; lines.push([x.person.name, p.name, C.findEstate(S(), p.estateId) ? C.findEstate(S(), p.estateId).name : C.NO_ESTATE_NAME, v.area == null ? '' : v.area * k, v.price != null ? v.price : (v.pricePerM2 || ''), v.total == null ? '' : v.total * k, sh ? fa(C.fText(sh)) : '۱۰۰٪']); });
     lines.push(['جمع', '', '', x.heldArea, '', R(x.heldValue), '']);
     return '\uFEFF' + lines.map(row => row.map(v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"').join(',')).join('\n');
   }
@@ -427,7 +482,7 @@
     const sum = [['شخص', 'حق از زمین‌ها', 'خانه', 'سایر', 'اعتبار', 'ارزش زمین‌های دستش', 'مانده/کسری']];
     d.people.forEach(x => sum.push([x.person.name, R(x.entitlement), R(x.house), R(x.adjust), R(x.credit), R(x.heldValue), R(x.remaining)])); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sum), 'خلاصه');
     const lst = [['شخص', 'زمین', 'دسته', 'مساحت جاری', 'قیمت هر متر', 'ارزش جاری']];
-    d.people.forEach(x => { x.held.forEach(p => { const v = liveV(p); lst.push([x.person.name, p.name, estateName(p), v.area || '', v.price != null ? v.price : v.pricePerM2 || '', v.total || '']); }); lst.push([x.person.name + ' — جمع', '', '', x.heldArea, '', R(x.heldValue)]); }); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(lst), 'لیست نهایی');
+    d.people.forEach(x => { x.held.forEach(p => { const v = liveV(p), sh = p.coOwnerShare ? C.toFrac(p.coOwnerShare) : null, k = sh ? C.fToNumber(sh) : 1; lst.push([x.person.name, p.name + (sh ? ' — مشاع ' + fa(C.fText(sh)) : ''), estateName(p), v.area == null ? '' : v.area * k, v.price != null ? v.price : v.pricePerM2 || '', v.total == null ? '' : v.total * k]); }); lst.push([x.person.name + ' — جمع', '', '', x.heldArea, '', R(x.heldValue)]); }); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(lst), 'لیست نهایی');
     const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }); App.downloadBlob('تقسیم-زمین‌ها.xlsx', new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
   }
 

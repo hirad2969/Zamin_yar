@@ -959,7 +959,7 @@
   function newParcel(init) {
     const t = nowIso();
     return Object.assign({
-      id: uid('land'), name: '', scope: 'rural_inside', estateId: null, holderId: null,
+      id: uid('land'), name: '', scope: 'rural_inside', estateId: null, holderId: null, coOwners: [],
       geometry: null, areaComputed: null, areaOverride: null,
       attrs: { residential: 'unknown', agri: 'none', farmType: 'irrigated', urbanUse: 'residential' },
       grade: 'manual', gradeSource: 'auto', gradeReason: '', special: false, specialReason: '',
@@ -972,12 +972,73 @@
   /* ---------------------------------------------------------------- */
   /* وضعیت کل برنامه، تنظیمات و تاریخچه‌ی قیمت                         */
   /* ---------------------------------------------------------------- */
+  function defaultInheritanceRule() {
+    return { mode: 'iran_preset', jurisdiction: 'iran_shia', legalReviewed: false, ratios: {}, relations: {}, debt: '', will: '', note: '' };
+  }
+  function defaultAllocationPolicy() {
+    return { mode: 'ask', preserveExisting: true, indivisible: 'physical_then_cash', splitMode: 'area', allowCoownership: false, mixKeys: ['scope', 'grade', 'type', 'special'], personWeights: {}, resolutions: {}, includeUnclassified: true };
+  }
+  function ensureTrash(state) {
+    state.trash = state.trash || { parcels: [], persons: [], estates: [] };
+    state.trash.parcels = Array.isArray(state.trash.parcels) ? state.trash.parcels : [];
+    state.trash.persons = Array.isArray(state.trash.persons) ? state.trash.persons : [];
+    state.trash.estates = Array.isArray(state.trash.estates) ? state.trash.estates : [];
+    return state.trash;
+  }
+  function newProfileMeta(name, parentId) {
+    const t = nowIso(); return { id: uid('profile'), name: name || 'پرونده‌ی جدید', parentId: parentId || null, createdAt: t, updatedAt: t };
+  }
+  /** ساخت فایل پروفایل مستقل از زیرمجموعه‌ی فعلی؛ ارزش‌ها در پروفایل مقصد دوباره محاسبه می‌شوند. */
+  function createProfilePackage(state, opts) {
+    opts = opts || {};
+    const ids = Array.isArray(opts.parcelIds) ? new Set(opts.parcelIds.map(String)) : new Set((state.parcels || []).map(p => String(p.id)));
+    const raw = clone(state), usedEstates = new Set();
+    raw.parcels = raw.parcels.filter(p => ids.has(String(p.id)));
+    raw.parcels.forEach(p => { if (p.estateId) usedEstates.add(p.estateId); });
+    const personIds = Array.isArray(opts.personIds) ? new Set(opts.personIds) : new Set(raw.persons.map(person => person.id));
+    raw.persons = raw.persons.filter(p => personIds.has(p.id));
+    raw.estates = raw.estates.filter(e => usedEstates.has(e.id));
+    raw.house = clone(state.house || { amount: '', receivers: [], payer: '' });
+    raw.house.receivers = (raw.house.receivers || []).filter(id => personIds.has(id)); if (!personIds.has(raw.house.payer)) raw.house.payer = '';
+    raw.adjust = Object.keys(state.adjust || {}).reduce((out, id) => { if (personIds.has(id)) out[id] = state.adjust[id]; return out; }, {});
+    raw.familySplits = Object.keys(state.familySplits || {}).reduce((out, id) => { if (personIds.has(id)) out[id] = clone(state.familySplits[id]); return out; }, {});
+    raw.inheritanceRule = clone(state.inheritanceRule || defaultInheritanceRule());
+    raw.inheritanceRule.ratios = Object.keys(raw.inheritanceRule.ratios || {}).reduce((out, id) => { if (personIds.has(id)) out[id] = raw.inheritanceRule.ratios[id]; return out; }, {});
+    raw.inheritanceRule.relations = Object.keys(raw.inheritanceRule.relations || {}).reduce((out, id) => { if (personIds.has(id)) out[id] = raw.inheritanceRule.relations[id]; return out; }, {});
+    raw.allocationPolicy = clone(state.allocationPolicy || defaultAllocationPolicy());
+    raw.allocationPolicy.personWeights = Object.keys(raw.allocationPolicy.personWeights || {}).reduce((out, id) => { if (personIds.has(id)) out[id] = raw.allocationPolicy.personWeights[id]; return out; }, {});
+    raw.scenarios = (raw.scenarios || []).filter(sc => !Array.isArray(sc.parcelIds) || sc.parcelIds.some(id => ids.has(String(id)))).map(sc => { const out = clone(sc); if (Array.isArray(out.parcelIds)) out.parcelIds = out.parcelIds.filter(id => ids.has(String(id))); if (Array.isArray(out.personIds)) out.personIds = out.personIds.filter(id => personIds.has(id)); return out; });
+    raw.randomDivision = raw.randomDivision && (!Array.isArray(raw.randomDivision.selectedIds) || raw.randomDivision.selectedIds.some(id => ids.has(String(id)))) ? raw.randomDivision : null;
+    raw.allocationRun = raw.allocationRun ? clone(raw.allocationRun) : null;
+    raw.divisionSelection = { mode: 'all', scopes: [], grades: [], types: [], estates: [], ids: null, excludedIds: [], includeUnclassified: true };
+    raw.profile = newProfileMeta(opts.name || 'پروفایل جدید', state.profile && state.profile.id); raw.profile.note = opts.note || 'ساخته‌شده از زیرمجموعه‌ی پروفایل مادر';
+    raw.trash = { parcels: [], persons: [], estates: [] }; raw.log = (raw.log || []).slice(-200).concat([{ at: nowIso(), msg: 'ساخت پروفایل مستقل' }]);
+    return raw;
+  }
+  function inheritanceRatios(state) {
+    const rule = state && state.inheritanceRule || {}, r = rule.ratios && typeof rule.ratios === 'object' ? rule.ratios : {};
+    const explicit = Object.keys(r).some(id => { const f = toFrac(r[id]); return f && fSign(f) > 0; });
+    if (explicit) return r;
+    // تنها preset خودکارِ کم‌ابهام: فرزندانِ پسر/دختر در نبود همسر/والدین
+    // با واحدهای ۲ و ۱ پیشنهاد می‌شوند؛ این «حکم حقوقی» نیست و باید تأیید شود.
+    if (rule.jurisdiction === 'iran_shia' && state && Array.isArray(state.persons) && state.persons.length && Object.keys(rule.relations || {}).length === state.persons.length) {
+      const rels = state.persons.map(p => rule.relations[p.id]);
+      if (rels.every(x => x === 'son' || x === 'daughter') && rels.some(x => x === 'son') && rels.some(x => x === 'daughter')) {
+        const out = {}; state.persons.forEach(p => { out[p.id] = rule.relations[p.id] === 'son' ? '2' : '1'; }); return out;
+      }
+    }
+    return {};
+  }
+
   function newState() {
     const s = defaultSettings();
     return {
       schema: 1, settings: s,
       settingsHistory: [{ version: s.version, at: s.updatedAt, settings: clone(s), reason: 'نسخه‌ی اولیه' }],
       parcels: [], persons: [], estates: [], scenarios: [], log: [],
+      profile: newProfileMeta('پرونده‌ی اصلی', null),
+      trash: { parcels: [], persons: [], estates: [] },
+      inheritanceRule: defaultInheritanceRule(), allocationPolicy: defaultAllocationPolicy(), allocationRun: null,
       house: { amount: '', receivers: [], payer: '' }, adjust: {},
       // حالت تقسیم زنده: همه‌ی زمین‌ها از ابتدا انتخاب‌اند؛ کاربر می‌تواند
       // فیلتر یا حذف موردی بسازد بدون این‌که ترتیب/داده‌ی زمین‌ها تغییر کند.
@@ -999,7 +1060,9 @@
   }
   /** حذف یک زمین از فهرست فعال؛ پرونده‌های زنده هم از شناسه‌ی آن پاک می‌شوند. */
   function removeParcel(state, parcelId) {
-    const before = (state.parcels || []).length;
+    const before = (state.parcels || []).length, removed = (state.parcels || []).find(p => p.id === parcelId);
+    if (!removed) return false;
+    ensureTrash(state).parcels.push({ deletedAt: nowIso(), item: clone(removed) });
     state.parcels = (state.parcels || []).filter(p => p.id !== parcelId);
     if (state.parcels.length === before) return false;
     (state.scenarios || []).forEach(sc => {
@@ -1111,12 +1174,16 @@
   function findEstate(state, id) { return id ? ((state.estates || []).find(e => e.id === id) || null) : null; }
   /** حذف دسته: زمین‌ها و سناریوها «دسته‌بندی‌نشده» می‌شوند (هیچ داده‌ای گم نمی‌شود) */
   function removeEstate(state, id) {
+    const removed = (state.estates || []).find(e => e.id === id); if (!removed) return false;
+    const affectedParcelIds = (state.parcels || []).filter(p => p.estateId === id).map(p => p.id);
+    ensureTrash(state).estates.push({ deletedAt: nowIso(), item: clone(removed), affectedParcelIds });
     state.estates = (state.estates || []).filter(e => e.id !== id);
     (state.parcels || []).forEach(p => { if (p.estateId === id) p.estateId = null; });
     (state.scenarios || []).forEach(sc => {
       Object.keys(sc.parcels || {}).forEach(k => { if (sc.parcels[k].estateId === id) sc.parcels[k].estateId = null; });
       if (Array.isArray(sc.estates)) sc.estates = sc.estates.filter(x => x !== id);
     });
+    return true;
   }
   /** سهم نسبی یک شخص در یک دسته (کسر دقیق؛ ثبت‌نشده = صفر) */
   function estateWeightFrac(estate, personId) {
@@ -1699,8 +1766,13 @@
   }
   /** حذف کامل یک شخص از همه‌جا (واگذاری‌ها، بخش‌ها، معامله‌ها و عضویت پرونده‌ها) */
   function removePerson(state, personId) {
+    const removed = (state.persons || []).find(x => x.id === personId); if (!removed) return false;
+    ensureTrash(state).persons.push({ deletedAt: nowIso(), item: clone(removed) });
     state.persons = state.persons.filter(x => x.id !== personId);
-    (state.parcels || []).forEach(p => { if (p.holderId === personId) p.holderId = null; });
+    (state.parcels || []).forEach(p => {
+      if (p.holderId === personId) p.holderId = null;
+      if (Array.isArray(p.coOwners)) { p.coOwners = p.coOwners.filter(x => x && x.personId !== personId); if (p.coOwners.length === 1 && p.coOwners[0].share && fEq(toFrac(p.coOwners[0].share), F1())) { p.holderId = p.coOwners[0].personId; p.coOwners = []; } }
+    });
     if (state.adjust) delete state.adjust[personId];
     if (state.familySplits) delete state.familySplits[personId];
     if (state.house) { if (state.house.payer === personId) state.house.payer = ''; state.house.receivers = (state.house.receivers || []).filter(id => id !== personId); }
@@ -1714,6 +1786,17 @@
       (sc.sections || []).forEach(s => { if (s.weights) delete s.weights[personId]; });
       if (sc.deals) sc.deals = sc.deals.filter(d => d.from !== personId && d.to !== personId);
     });
+    return true;
+  }
+  /** بازگردانی مورد حذف‌شده؛ شناسه‌ی اصلی حفظ می‌شود مگر آن‌که تعارض داشته باشد. */
+  function restoreFromTrash(state, kind, id) {
+    ensureTrash(state); const list = state.trash[kind + 's']; if (!Array.isArray(list)) return null;
+    const i = list.findIndex(x => x.item && x.item.id === id); if (i < 0) return null;
+    const item = clone(list[i].item);
+    if ((state[kind + 's'] || []).some(x => x.id === item.id)) item.id = uid(kind);
+    state[kind + 's'].push(item);
+    if (kind === 'estate' && Array.isArray(list[i].affectedParcelIds)) list[i].affectedParcelIds.forEach(pid => { const p = (state.parcels || []).find(x => x.id === pid); if (p && !p.estateId) p.estateId = item.id; });
+    list.splice(i, 1); state.log = state.log || []; state.log.push({ at: nowIso(), msg: 'بازگردانی ' + kind + ' «' + (item.name || item.id) + '»' }); return item;
   }
 
   function sectionPlan(sc, snap, persons, poolF, errors) {
@@ -2241,6 +2324,233 @@
   }
 
   /* ---------------------------------------------------------------- */
+  /* تخصیص تجاریِ خودکار: حفظ تقسیمات موجود، تنوع اموال و تسویه‌ی دقیق    */
+  /* این بخش «پیشنهاد» را از «ثبت» جدا می‌کند تا هیچ تخصیص یا برش مهمی     */
+  /* بدون تأیید کاربر وارد پروژه نشود.                                    */
+  /* ---------------------------------------------------------------- */
+  const ALLOCATION_MODES = { ask: 'انتخاب ملاک در هر نوبت', equal_value: 'برابری در ارزش نهایی', equal_mix: 'برابری در ترکیب اموال', law_ratio: 'نسبت قانونی/ارث', custom: 'قانون سفارشی' };
+  const ALLOCATION_SPLITS = { area: 'تقسیم متری', percent: 'تقسیم درصدی', cash: 'تسویه‌ی نقدی' };
+  function allocationValueF(state, p) {
+    const v = currentValuation(p, state && state.settings);
+    return isNum(v.total) ? frac(Math.round(v.total)) : F0();
+  }
+  function normalizeAllocationPolicy(state, policy) {
+    const src = policy || {};
+    const out = Object.assign({
+      mode: state && state.allocationPolicy && state.allocationPolicy.mode ? state.allocationPolicy.mode : 'ask',
+      preserveExisting: true,
+      indivisible: 'physical_then_cash',
+      splitMode: 'area',
+      allowCoownership: false,
+      mixKeys: ['scope', 'grade', 'type', 'special'],
+      personWeights: {},
+      resolutions: {},
+      includeUnclassified: true,
+    }, src);
+    if (!ALLOCATION_MODES[out.mode]) out.mode = 'equal_value';
+    if (['area', 'percent', 'cash'].indexOf(out.splitMode) < 0) out.splitMode = 'area';
+    if (out.splitMode === 'cash') out.indivisible = 'cash_only';
+    else if (out.splitMode === 'area' || out.splitMode === 'percent') out.indivisible = 'physical_then_cash';
+    if (['physical_then_cash', 'cash_only'].indexOf(out.indivisible) < 0) out.indivisible = 'physical_then_cash';
+    out.mixKeys = Array.isArray(out.mixKeys) ? out.mixKeys.filter(k => ['scope', 'grade', 'type', 'special', 'estate'].indexOf(k) >= 0) : ['scope', 'grade', 'type', 'special'];
+    out.personWeights = out.personWeights && typeof out.personWeights === 'object' ? out.personWeights : {};
+    out.resolutions = out.resolutions && typeof out.resolutions === 'object' ? out.resolutions : {};
+    out.includeUnclassified = out.includeUnclassified !== false;
+    out.preserveExisting = out.preserveExisting !== false;
+    return out;
+  }
+  function allocationClassKey(p, policy) {
+    const keys = policy.mixKeys || [];
+    if (!keys.length) return 'all';
+    return keys.map(k => {
+      if (k === 'scope') return String(p.scope || 'unknown');
+      if (k === 'grade') return String(p.grade || 'manual');
+      if (k === 'type') return divisionTypeKey(p);
+      if (k === 'special') return p.special ? 'special' : 'normal';
+      if (k === 'estate') return estateIdOf(p) || 'unclassified';
+      return '';
+    }).join('|');
+  }
+  function allocationShareFractions(state, persons, live, policy) {
+    let ws = persons.map(() => F0());
+    if (policy.mode === 'equal_value' || policy.mode === 'equal_mix') {
+      ws = persons.map(() => frac(1));
+    } else {
+      ws = persons.map((p, i) => {
+        const law = inheritanceRatios(state);
+        const raw = policy.personWeights[p.id] != null ? policy.personWeights[p.id] : (law[p.id] != null ? law[p.id] : null);
+        if (raw != null) { const f = toFrac(raw); if (f && fSign(f) > 0) return f; }
+        const r = live.people[i];
+        return r && r.entitlement ? r.entitlement : F0();
+      });
+    }
+    let sum = F0(); ws.forEach(w => { sum = fAdd(sum, w); });
+    if (fSign(sum) <= 0) { ws = persons.map(() => frac(1)); sum = frac(persons.length || 1); }
+    return { weights: ws, sum, shares: ws.map(w => fDiv(w, sum)) };
+  }
+  function allocationPersonName(state, id) { const p = (state.persons || []).find(x => x.id === id); return p ? p.name : '—'; }
+  function allocationRank(persons, targetLand, held, classDesired, classHeld, classKey, mode) {
+    return persons.map((p, i) => {
+      const overall = fSub(targetLand[i], held[i]);
+      const cTarget = classDesired[classKey] ? classDesired[classKey][i] : F0();
+      const cHeld = classHeld[classKey] ? classHeld[classKey][i] : F0();
+      const cDef = fSub(cTarget, cHeld);
+      return { p, i, overall, cDef, positiveOverall: fSign(overall) > 0, positiveClass: fSign(cDef) > 0 };
+    }).sort((a, b) => {
+      if (mode === 'equal_mix') {
+        if (a.positiveClass !== b.positiveClass) return a.positiveClass ? -1 : 1;
+        const c = fCmp(b.cDef, a.cDef); if (c) return c;
+      }
+      const o = fCmp(b.overall, a.overall); if (o) return o;
+      return String(a.p.name || a.p.id).localeCompare(String(b.p.name || b.p.id), 'fa');
+    });
+  }
+  function allocationPortions(value, area, ranks, held, targetLand, classDesired, classHeld, classKey, mode) {
+    let remaining = value, out = [];
+    for (const r of ranks) {
+      const d = fSub(targetLand[r.i], held[r.i]);
+      if (fSign(d) <= 0) continue;
+      const take = fCmp(remaining, d) <= 0 ? remaining : d;
+      if (fSign(take) <= 0) continue;
+      const share = fDiv(take, value);
+      out.push({ personId: r.p.id, personName: r.p.name, value: fPack(take), share: fPack(share), area: area == null ? null : fToNumber(fMul(frac(Math.round(area * 1000000), 1000000), share)) });
+      remaining = fSub(remaining, take);
+      if (fSign(remaining) <= 0) break;
+    }
+    if (fSign(remaining) > 0) {
+      const r = ranks[0];
+      if (r) {
+        const existing = out.find(x => x.personId === r.p.id);
+        if (existing) existing.value = fPack(fAdd(toFrac(existing.value), remaining));
+        else out.push({ personId: r.p.id, personName: r.p.name, value: fPack(remaining), share: fPack(fDiv(remaining, value)), area: area == null ? null : fToNumber(fMul(frac(Math.round(area * 1000000), 1000000), fDiv(remaining, value))) });
+      }
+    }
+    // کسرهای هر بخش را دقیقاً به یک برسان؛ بخش اضافه‌ی ناشی از گردکردن فقط در نمایش رخ می‌دهد.
+    let ss = F0(); out.forEach(x => { ss = fAdd(ss, toFrac(x.share)); });
+    if (out.length && !fEq(ss, F1())) { const last = out[out.length - 1]; last.share = fPack(fAdd(toFrac(last.share), fSub(F1(), ss))); }
+    return out;
+  }
+  function allocationCashRows(state, persons, targetFinal, held) {
+    return persons.map((p, i) => {
+      const amount = fSub(targetFinal[i], held[i]);
+      return { id: p.id, name: p.name, amountExact: fPack(amount), amount: fToNumber(amount) };
+    });
+  }
+  /**
+   * محاسبه‌ی پیشنهاد تخصیص؛ هیچ‌چیز را در state تغییر نمی‌دهد.
+   * اگر ملک بزرگ‌تر از کسری چند نفر باشد، requiresInput=true برمی‌گرداند و
+   * رابط باید برای همان ملک «متری/درصدی/نقدی» را از کاربر بپرسد.
+   */
+  function automaticAllocationPlan(state, opts) {
+    opts = opts || {};
+    const policy = normalizeAllocationPolicy(state, opts.policy || opts);
+    if (policy.mode === 'ask') return { ok: false, errors: ['ابتدا ملاک تقسیم را انتخاب کنید: برابری در ارزش، برابری در ترکیب اموال، نسبت قانونی یا قانون سفارشی.'] };
+    const ids = Array.isArray(opts.selectedIds) ? opts.selectedIds.map(String) : divisionParcelIds(state, state.divisionSelection);
+    const selected = ids.map(id => (state.parcels || []).find(p => String(p.id) === id)).filter(Boolean);
+    if (!selected.length) return { ok: false, errors: ['هیچ زمینی برای تخصیص خودکار انتخاب نشده است'] };
+    const live = divisionLive(state, { parcelIds: selected.map(p => p.id), includeUnclassified: policy.includeUnclassified });
+    if (!live) return { ok: false, errors: ['محاسبه‌ی زنده انجام نشد'] };
+    if (live.errors.length) return { ok: false, errors: live.errors.slice() };
+    const persons = state.persons || [];
+    if (!persons.length) return { ok: false, errors: ['ابتدا اشخاص/ورثه را ثبت کنید'] };
+    const effective = policy.includeUnclassified ? selected : selected.filter(p => findEstate(state, p.estateId));
+    const values = effective.map(p => allocationValueF(state, p));
+    if (values.some(v => fSign(v) < 0)) return { ok: false, errors: ['ارزش منفی در زمین‌ها مجاز نیست'] };
+    const shares = allocationShareFractions(state, persons, live, policy);
+    let totalF = F0(); values.forEach(v => { totalF = fAdd(totalF, v); });
+    const targetLand = shares.shares.map(s => fMul(totalF, s));
+    const targetFinal = persons.map((p, i) => {
+      const r = live.people.find(x => x.person.id === p.id);
+      return fAdd(targetLand[i], r ? fAdd(r.house || F0(), r.adjust || F0()) : F0());
+    });
+    const held = persons.map(() => F0()), classHeld = {}, classDesired = {},
+      classKeys = new Set(), whole = [], splits = [], coownerships = [], free = [];
+    const holderFor = p => policy.preserveExisting ? holderOfParcel(state, p) : '';
+    effective.forEach(p => {
+      const v = allocationValueF(state, p), h = holderFor(p), co = coOwnersOfParcel(state, p), ck = allocationClassKey(p, policy);
+      classKeys.add(ck);
+      if (!classDesired[ck]) classDesired[ck] = persons.map(() => F0());
+      persons.forEach((_, i) => { classDesired[ck][i] = fAdd(classDesired[ck][i], fMul(v, shares.shares[i])); });
+      if (h) {
+        const i = persons.findIndex(x => x.id === h);
+        if (i >= 0) {
+          held[i] = fAdd(held[i], v); if (!classHeld[ck]) classHeld[ck] = persons.map(() => F0()); classHeld[ck][i] = fAdd(classHeld[ck][i], v);
+        } else free.push(p);
+      } else if (co.length) {
+        co.forEach(o => { const i = persons.findIndex(x => x.id === o.personId); if (i >= 0) { const ov = fMul(v, o.share); held[i] = fAdd(held[i], ov); if (!classHeld[ck]) classHeld[ck] = persons.map(() => F0()); classHeld[ck][i] = fAdd(classHeld[ck][i], ov); } });
+      } else free.push(p);
+    });
+    // اگر حفظ تقسیمات خاموش باشد، همه‌ی زمین‌های انتخابی از نو قابل تخصیص‌اند.
+    if (!policy.preserveExisting) { free.length = 0; effective.forEach(p => free.push(p)); for (let i = 0; i < held.length; i++) held[i] = F0(); }
+    const virtual = held.slice(), virtualClass = {};
+    Object.keys(classHeld).forEach(k => { virtualClass[k] = classHeld[k].slice(); });
+    const addVirtual = (i, ck, v) => { virtual[i] = fAdd(virtual[i], v); if (!virtualClass[ck]) virtualClass[ck] = persons.map(() => F0()); virtualClass[ck][i] = fAdd(virtualClass[ck][i], v); };
+    const sortFree = free.slice().sort((a, b) => fToNumber(allocationValueF(state, b)) - fToNumber(allocationValueF(state, a)));
+    for (const p of sortFree) {
+      const v = allocationValueF(state, p), ck = allocationClassKey(p, policy);
+      const ranks = allocationRank(persons, targetLand, virtual, classDesired, virtualClass, ck, policy.mode);
+      const best = ranks[0]; if (!best) continue;
+      const positive = ranks.filter(r => r.positiveOverall);
+      const bestDef = positive.length ? fSub(targetLand[best.i], virtual[best.i]) : F0();
+      const oversized = positive.length > 1 && fCmp(v, bestDef) > 0;
+      const resolution = policy.resolutions[String(p.id)] || null;
+      const canPhysical = !!(p.geometry && p.geometry.ring && p.geometry.ring.length >= 3 && isNum(currentValuation(p, state.settings).area));
+      if (oversized && policy.indivisible === 'physical_then_cash' && !resolution && canPhysical) {
+        const portions = allocationPortions(v, currentValuation(p, state.settings).area, ranks, virtual, targetLand, classDesired, virtualClass, ck, policy.mode);
+        const options = ['area', 'percent', 'cash']; if (policy.allowCoownership) options.push('coownership');
+        return { ok: true, requiresInput: true, selectedIds: effective.map(x => x.id), policy, live, request: { parcelId: p.id, parcelName: p.name, value: fPack(v), area: currentValuation(p, state.settings).area, canPhysical, options, portions, anchorPersonId: best.p.id, anchorPersonName: best.p.name, message: 'این ملک از کسری یک نفر بزرگ‌تر است؛ روش تقسیم را انتخاب کنید.' }, partial: { whole, splits, coownerships }, targets: persons.map((x, i) => ({ id: x.id, name: x.name, share: fPack(shares.shares[i]), landTarget: fPack(targetLand[i]), finalTarget: fPack(targetFinal[i]) })) };
+      }
+      if (oversized && resolution === 'coownership') {
+        const portions = allocationPortions(v, currentValuation(p, state.settings).area, ranks, virtual, targetLand, classDesired, virtualClass, ck, policy.mode);
+        coownerships.push({ parcelId: p.id, parcelName: p.name, portions, value: fPack(v) });
+        portions.forEach(x => { const i = persons.findIndex(y => y.id === x.personId); addVirtual(i, ck, toFrac(x.value)); });
+      } else if (oversized && (resolution === 'area' || resolution === 'percent') && canPhysical) {
+        const portions = allocationPortions(v, currentValuation(p, state.settings).area, ranks, virtual, targetLand, classDesired, virtualClass, ck, policy.mode);
+        splits.push({ parcelId: p.id, parcelName: p.name, mode: resolution, portions, anchorPersonId: best.p.id, shares: portions.map(x => x.share) });
+        portions.forEach(x => { const i = persons.findIndex(y => y.id === x.personId); addVirtual(i, ck, toFrac(x.value)); });
+      } else {
+        whole.push({ parcelId: p.id, parcelName: p.name, personId: best.p.id, personName: best.p.name, value: fPack(v), classKey: ck });
+        addVirtual(best.i, ck, v);
+      }
+    }
+    const cash = allocationCashRows(state, persons, targetFinal, virtual);
+    const score = persons.reduce((sum, p, i) => sum + Math.abs(fToNumber(fSub(targetLand[i], virtual[i]))), 0);
+    const sumCash = cash.reduce((s, x) => s + x.amount, 0);
+    return { ok: true, requiresInput: false, selectedIds: effective.map(x => x.id), policy, live, targets: persons.map((x, i) => ({ id: x.id, name: x.name, share: fPack(shares.shares[i]), landTarget: fPack(targetLand[i]), finalTarget: fPack(targetFinal[i]) })), whole, splits, coownerships, cash, settlement: cashSettlementFromNumbers(cash), score, balanced: Math.abs(sumCash) < 0.5, warnings: Math.abs(sumCash) >= 0.5 ? ['جمع مانده‌های نقدی صفر نیست؛ تعدیل/خانه/بدهی‌ها باید جداگانه بررسی شود.'] : [] };
+  }
+  function applyAutomaticAllocation(state, plan, opts) {
+    opts = opts || {};
+    if (!plan || !plan.ok) return { ok: false, errors: ['طرح تخصیص معتبر نیست'] };
+    if (plan.requiresInput) return { ok: false, requiresInput: true, request: plan.request, errors: ['برای ملک «' + plan.request.parcelName + '» روش تقسیم انتخاب نشده است'] };
+    const changed = [], splitParts = [];
+    (plan.whole || []).forEach(x => { const r = setHolder(state, x.parcelId, x.personId, true); if (r.ok) changed.push(x.parcelId); });
+    (plan.splits || []).forEach(x => {
+      const p = state.parcels.find(q => q.id === x.parcelId); if (!p) return;
+      if (!p.geometry || !p.geometry.ring) { setHolder(state, p.id, x.anchorPersonId, true); changed.push(p.id); return; }
+      const rings = splitMulti(p.geometry.ring, x.shares, { azimuth: principalAzimuth(p.geometry.ring) });
+      if (!rings.ok) { setHolder(state, p.id, x.anchorPersonId, true); changed.push(p.id); return; }
+      const idx = state.parcels.findIndex(q => q.id === p.id), base = clone(p), made = [];
+      rings.parts.forEach((part, i) => {
+        const portion = x.portions[i], q = clone(base);
+        q.id = i === 0 ? p.id : uid('land'); q.name = (base.name || base.id) + ' — بخش ' + (i + 1);
+        q.geometry = { ring: part.ring, source: 'auto-split', meta: { parentId: base.id, allocationMode: x.mode, note: 'برش خودکار پس از تأیید کاربر' } };
+        q.areaComputed = part.area; q.areaOverride = null; q.holderId = portion.personId; q.valuation = null;
+        q.history = (base.history || []).slice(); applyValuation(q, state.settings, 'تقسیم خودکار ملک با روش ' + (x.mode === 'percent' ? 'درصدی' : 'متری'));
+        made.push(q);
+      });
+      state.parcels.splice(idx, 1, ...made); splitParts.push({ parentId: p.id, ids: made.map(q => q.id) }); changed.push(p.id);
+      if (state.divisionSelection && Array.isArray(state.divisionSelection.ids)) { state.divisionSelection.ids = state.divisionSelection.ids.filter(id => id !== p.id).concat(made.map(q => q.id)); }
+    });
+    (plan.coownerships || []).forEach(x => {
+      const p = state.parcels.find(q => q.id === x.parcelId); if (!p || !Array.isArray(x.portions) || !x.portions.length) return;
+      p.holderId = null; p.coOwners = x.portions.map(part => ({ personId: part.personId, share: clone(part.share), value: clone(part.value) })); changed.push(p.id);
+    });
+    state.allocationRun = { id: uid('alloc'), at: nowIso(), mode: plan.policy.mode, selectedIds: plan.selectedIds.slice(), preserveExisting: plan.policy.preserveExisting, allowCoownership: plan.policy.allowCoownership, splitMode: plan.policy.splitMode, resolutions: clone(plan.policy.resolutions || {}) };
+    state.log = state.log || []; state.log.push({ at: nowIso(), msg: 'ثبت تخصیص خودکار (' + (ALLOCATION_MODES[plan.policy.mode] || plan.policy.mode) + ')' });
+    return { ok: true, changed, splitParts, cash: plan.cash, settlement: plan.settlement, score: plan.score, warnings: plan.warnings || [] };
+  }
+
+  /* ---------------------------------------------------------------- */
   /* تقسیم زنده: همه‌چیز مستقیم از «دسته‌ی هر زمین» و «دست کی بودن» حساب می‌شود */
   /* هیچ فهرست یا عدد حفظ‌شده‌ای وجود ندارد؛ با هر تغییر، همه‌چیز از نو محاسبه می‌شود */
   /* ---------------------------------------------------------------- */
@@ -2248,13 +2558,18 @@
   /** کسی که زمین‌هایش قابل خرید است (کسی که در «خانه‌ی شهر» بدهکار است) */
   const sellerId = (state) => (state.house && state.house.payer) || '';
   /** دست چه کسی است؟ شناسه‌ی نامعتبر = آزاد */
-  function holderOfParcel(state, p) {
-    return (p && p.holderId && (state.persons || []).some(x => x.id === p.holderId)) ? p.holderId : '';
+  function coOwnersOfParcel(state, p) {
+    return (p && Array.isArray(p.coOwners) ? p.coOwners : []).filter(x => x && x.personId && (state.persons || []).some(person => person.id === x.personId)).map(x => Object.assign({}, x, { share: toFrac(x.share) || F0() }));
   }
-  /** آیا شخص می‌تواند این زمین را بردارد؟ فقط زمینِ فروشنده یا زمین آزاد (خارج‌شده از لیست کسی) */
+  function holderOfParcel(state, p) {
+    return coOwnersOfParcel(state, p).length ? '' : ((p && p.holderId && (state.persons || []).some(x => x.id === p.holderId)) ? p.holderId : '');
+  }
+  /** آیا شخص می‌تواند این زمین را بردارد؟ فقط زمینِ فروشنده یا زمین آزاد (مشاع باید صریحاً شکسته شود) */
   function canTake(state, parcelId, personId) {
     const p = (state.parcels || []).find(x => x.id === parcelId);
     if (!p) return { ok: false, reason: 'زمین پیدا نشد' };
+    const co = coOwnersOfParcel(state, p);
+    if (co.length && personId) return { ok: false, reason: 'این زمین مشاع است؛ برای تغییر، ابتدا سهم‌های مشاع را در برگه‌ی تأییدشده بررسی و آزاد کنید' };
     const cur = holderOfParcel(state, p);
     if (!personId || cur === personId) return { ok: true };
     if (!cur || cur === sellerId(state)) return { ok: true };
@@ -2267,7 +2582,7 @@
     if (!p) return { ok: false, reason: 'زمین پیدا نشد' };
     const chk = force ? { ok: true } : canTake(state, parcelId, personId);
     if (!chk.ok) return chk;
-    p.holderId = personId || null;
+    p.coOwners = []; p.holderId = personId || null;
     return { ok: true };
   }
   /**
@@ -2286,6 +2601,7 @@
     // در رابط انتخابی، برداشتن تیک «بدون دسته» آن زمین را واقعاً از جمع کل خارج می‌کند.
     // حالت قدیمیِ بدون opts عمداً برای سازگاری هشدار می‌دهد ولی کل فهرست را نشان می‌دهد.
     const parcels = requested && !includeUnclassified ? candidates.filter(p => !!gid(p)) : candidates;
+    parcels.forEach(p => { const co = coOwnersOfParcel(state, p); if (co.length) { let sum = F0(); co.forEach(o => { sum = fAdd(sum, o.share); }); if (!fEq(sum, F1())) errors.push('سهم‌های مشاعِ «' + (p.name || p.id) + '» باید دقیقاً ۱۰۰٪ باشند'); } });
     const valueOf = (p) => currentValuation(p, state.settings);
     const valueF = (p) => { const v = valueOf(p); if (isNum(v.total)) return frac(Math.round(v.total)); const nm = p.name || p.id; if (incompleteNames.indexOf(nm) < 0) incompleteNames.push(nm); return F0(); };
     const areaOf = (p) => { const v = valueOf(p); return isNum(v.area) ? v.area : 0; };
@@ -2331,11 +2647,13 @@
       let adj = parseAdjust((state.adjust || {})[x.id]);
       if (!adj) { errors.push('مبلغ «سایر» ' + x.name + ' نامعتبر است'); adj = F0(); }
       const credit = fAdd(fAdd(ent, hf), adj);
-      const held = parcels.filter(p => holderOfParcel(state, p) === x.id).map(p => {
-        const q = Object.assign({}, p); q.valuation = valueOf(p); return q;
+      const held = [];
+      parcels.forEach(p => {
+        if (holderOfParcel(state, p) === x.id) { const q = Object.assign({}, p); q.valuation = valueOf(p); held.push(q); return; }
+        coOwnersOfParcel(state, p).filter(o => o.personId === x.id).forEach(o => { const q = Object.assign({}, p, { coOwnerShare: o.share }); q.valuation = valueOf(p); held.push(q); });
       });
       let heldV = F0(), heldArea = 0;
-      held.forEach(p => { heldV = fAdd(heldV, valueF(p)); heldArea += areaOf(p); });
+      held.forEach(p => { const share = p.coOwnerShare || F1(); heldV = fAdd(heldV, fMul(valueF(p), share)); heldArea += areaOf(p) * fToNumber(share); });
       const remaining = fSub(credit, heldV);
       return { person: x, parts, entitlement: ent, entitlementExact: fToNumber(ent), house: hf, adjust: adj,
         credit, creditExact: fToNumber(credit), held, heldValue: heldV, heldArea, remaining, remainingNum: fToNumber(remaining),
@@ -2344,7 +2662,7 @@
     people.forEach(r => { r.family = familyBreakdown(state, r.person.id, r.entitlement); });
 
     let total = F0(); parcels.forEach(p => { total = fAdd(total, valueF(p)); });
-    const free = parcels.filter(p => !holderOfParcel(state, p));
+    const free = parcels.filter(p => !holderOfParcel(state, p) && !coOwnersOfParcel(state, p).length);
     let freeV = F0(); free.forEach(p => { freeV = fAdd(freeV, valueF(p)); });
     let sumAdj = F0(), sumRem = F0(), sumCredit = F0(), sumHeld = F0(), sumEnt = F0();
     people.forEach(r => { sumAdj = fAdd(sumAdj, fAdd(r.house, r.adjust)); sumRem = fAdd(sumRem, r.remaining); sumCredit = fAdd(sumCredit, r.credit); sumHeld = fAdd(sumHeld, r.heldValue); sumEnt = fAdd(sumEnt, r.entitlement); });
@@ -2369,7 +2687,7 @@
     splitDelimited, importTable, importText, importGeoJSON, importKML, buildPreview,
     SCOPES, GRADES, AGRI, FARM, RES, URBAN_USES, METHODS,
     defaultSettings, cellKey, suggestRuralGrade, featureScore, valuate, currentValuation, applyValuation, newParcel,
-    newState, addParcel, saveParcel, removeParcel, updateSettings,
+    newState, addParcel, saveParcel, removeParcel, updateSettings, defaultInheritanceRule, defaultAllocationPolicy, createProfilePackage, restoreFromTrash, inheritanceRatios,
     addPerson, setPersonWeight, personWeightFrac, createScenario,
     setAllocation, setEqualAllocation, allocFrac, allocSum, evaluateScenario,
     // دسته‌های اموال (چند منبع با سهم متفاوت) و مبنای قیمت سناریو
@@ -2381,8 +2699,9 @@
     // پرونده‌ی زنده
     parcelSnap, caseParcels, createCase, convertScenarioToCase, addSection, setSectionWeight, sectionWeightFrac, addDeal, removePerson, evaluateCase, parseAdjust, sectionsFromEstates,
     // تقسیم زنده‌ی ساده (دسته + دست کی) و ابزارهای انتخاب/تخصیص
-    divisionLive, canTake, setHolder, holderOfParcel, sellerId,
+    divisionLive, canTake, setHolder, holderOfParcel, coOwnersOfParcel, sellerId,
     normalizeDivisionSelection, parcelMatchesDivisionFilter, divisionTypeKey, divisionTypeLabel, divisionParcelIds, setDivisionSelection, sortDivisionParcels,
     setFamilySplitCount, setFamilyMember, familyBreakdown, randomAllocate,
+    ALLOCATION_MODES, ALLOCATION_SPLITS, normalizeAllocationPolicy, automaticAllocationPlan, applyAutomaticAllocation,
   };
 });

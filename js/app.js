@@ -17,6 +17,15 @@
     if (!s.house) s.house = { amount: '', receivers: [], payer: '' };
     if (!s.house.receivers) s.house.receivers = [];
     if (!s.adjust) s.adjust = {};
+    if (!s.profile) s.profile = { id: C.uid('profile'), name: 'پرونده‌ی اصلی', parentId: null, createdAt: C.nowIso(), updatedAt: C.nowIso() };
+    if (!s.trash || typeof s.trash !== 'object') s.trash = { parcels: [], persons: [], estates: [] };
+    ['parcels', 'persons', 'estates'].forEach(k => { if (!Array.isArray(s.trash[k])) s.trash[k] = []; });
+    if (!s.inheritanceRule || typeof s.inheritanceRule !== 'object') s.inheritanceRule = C.defaultInheritanceRule ? C.defaultInheritanceRule() : { mode: 'iran_preset', jurisdiction: 'iran_shia', legalReviewed: false, ratios: {}, relations: {} };
+    if (!s.inheritanceRule.ratios || typeof s.inheritanceRule.ratios !== 'object') s.inheritanceRule.ratios = {};
+    if (!s.inheritanceRule.relations || typeof s.inheritanceRule.relations !== 'object') s.inheritanceRule.relations = {};
+    if (!s.allocationPolicy || typeof s.allocationPolicy !== 'object') s.allocationPolicy = C.defaultAllocationPolicy ? C.defaultAllocationPolicy() : { mode: 'equal_value', preserveExisting: true, indivisible: 'physical_then_cash', splitMode: 'area', mixKeys: ['scope', 'grade', 'type', 'special'], personWeights: {}, resolutions: {}, includeUnclassified: true };
+    if (!s.allocationPolicy.personWeights || typeof s.allocationPolicy.personWeights !== 'object') s.allocationPolicy.personWeights = {};
+    if (!s.allocationPolicy.resolutions || typeof s.allocationPolicy.resolutions !== 'object') s.allocationPolicy.resolutions = {};
     if (!s.familySplits || typeof s.familySplits !== 'object') s.familySplits = {};
     if (!s.divisionSelection || typeof s.divisionSelection !== 'object') s.divisionSelection = { mode: 'all', scopes: [], grades: [], types: [], estates: [], ids: null, excludedIds: [], includeUnclassified: true };
     if (!Array.isArray(s.divisionSelection.scopes)) s.divisionSelection.scopes = [];

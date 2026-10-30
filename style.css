@@ -238,3 +238,13 @@ table.t td .sub{display:block;color:var(--mut);font-size:11px;margin-top:2px}
   .select-toolbar{align-items:flex-start;flex-direction:column}
 }
 .final-area{width:110px;min-width:86px;text-align:left;direction:ltr}
+
+/* ---- موتور تخصیص تجاری و حسابرسی ---- */
+.auto-policy-card{border:2px solid #7a5b12;background:#fffdf5}
+.auto-policy-card .auto-fields{align-items:flex-end;gap:10px}
+.auto-policy-card .auto-fields .f{min-width:190px}
+.mix-policy{margin:8px 0;background:#fffef3}
+.mix-policy .checkline{display:inline-flex;margin-left:14px}
+.law-table input{min-width:110px;width:100%}
+.law-table select{min-width:120px}
+@media(max-width:900px){.auto-policy-card .auto-fields{align-items:stretch;flex-direction:column}.auto-policy-card .auto-fields .f{width:100%}.mix-policy .checkline{display:flex}}

@@ -159,6 +159,7 @@ t('صفحه‌ی تقسیم: دسته‌ها با ارزش و ضریب، حسا�
   ok(!/سناریو|اشخاص و تقسیم/.test(doc.getElementById('people-root').textContent), 'اثری از سناریو مانده است');
   const root = doc.getElementById('people-root').textContent;
   ok(doc.getElementById('cat-table'), 'جدول دسته‌ها نیست');
+  ok(doc.getElementById('auto-box') && doc.getElementById('auto-allocate'), 'موتور تخصیص خودکار در رابط نیست');
   const facets = Array.from(doc.querySelectorAll('#division-selection .facet input[type=checkbox]'));
   ok(facets.length > 0 && facets.every(x => x.checked), 'همه‌ی فیلترهای محدوده/درجه/دسته باید پیش‌فرض فعال باشند');
   has(root, 'دره گرمی'); has(root, 'پدری'); has(root, '۲٬۱۰۰٬۰۰۰٬۰۰۰'); has(root, '۸٬۰۰۰٬۰۰۰٬۰۰۰', 'ارزش دسته‌ی پدری');

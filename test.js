@@ -1051,6 +1051,15 @@ t('انتخاب صریح بدون دسته: زمین از جمع حذف ولی �
   eq(d.selectedIds.length, 1); eq(d.selectedIds[0], classified.id); eq(d.unclassified.length, 1); ok(d.warns.some(x => /دسته‌بندی‌نشده/.test(x)));
   eq(C.fToNumber(d.total), 12000000);
 });
+t('preset ساده‌ی ایران: نسبت فرزندان فقط با بازبینی قابل پیشنهاد است', () => {
+  const st = C.newState(); const son = C.addPerson(st, 'پسر', 1), daughter = C.addPerson(st, 'دختر', 1); st.inheritanceRule.jurisdiction = 'iran_shia'; st.inheritanceRule.relations[son.id] = 'son'; st.inheritanceRule.relations[daughter.id] = 'daughter'; const r = C.inheritanceRatios(st); eq(r[son.id], '2'); eq(r[daughter.id], '1');
+});
+t('پروفایل مستقل و سطل بازگشت: حذف اشتباه قابل بازگردانی است', () => {
+  const st = C.newState(); const e = C.addEstate(st, 'پروفایل مادر'); const p = mkParcel({ name: 'قابل بازگشت', areaComputed: 100, estateId: e.id }); C.addParcel(st, p); const person = C.addPerson(st, 'الف', 1); C.setHolder(st, p.id, person.id, true);
+  const child = C.createProfilePackage(st, { parcelIds: [p.id], name: 'زیرپرونده' }); eq(child.parcels.length, 1); eq(child.persons.length, 1); eq(child.profile.parentId, st.profile.id);
+  ok(C.removeParcel(st, p.id)); eq(st.parcels.length, 0); ok(C.restoreFromTrash(st, 'parcel', p.id)); eq(st.parcels.length, 1); eq(st.parcels[0].id, p.id);
+  ok(C.removeEstate(st, e.id)); ok(C.restoreFromTrash(st, 'estate', e.id)); eq(st.parcels[0].estateId, e.id);
+});
 t('تقسیم سهم یک شخص بین خانواده با کسر دقیق', () => {
   const st = C.newState(); const e = C.addEstate(st, 'منبع'); const p = mkParcel({ scope: 'rural_outside', areaComputed: 100, estateId: e.id }); C.addParcel(st, p);
   const a = C.addPerson(st, 'مصطفی', 1), b = C.addPerson(st, 'امیر', 1); C.setEstateEqualWeights(st, e.id, [a.id, b.id]);
@@ -1058,6 +1067,33 @@ t('تقسیم سهم یک شخص بین خانواده با کسر دقیق', ()
   const f = C.divisionLive(st, { parcelIds: [p.id], includeUnclassified: true }).people.find(x => x.person.id === a.id).family;
   eq(f[0].shareText, '1/2'); eq(f[1].shareText, '1/4'); eq(f[2].shareText, '1/4');
 });
+t('تخصیص خودکار: تقسیمات موجود حفظ و باقی‌مانده بدون شریک‌سازی بی‌دلیل واگذار می‌شود', () => {
+  const st = C.newState(); const e = C.addEstate(st, 'اموال آزمایشی');
+  const make = (name, total) => { const p = C.newParcel({ name, scope: 'rural_outside', grade: 'grade1', areaComputed: 100, estateId: e.id, pricing: { override: total / 100, userPrice: null } }); C.addParcel(st, p); return p; };
+  const p1 = make('قبلاً تقسیم‌شده', 6000000000), p2 = make('باقی‌مانده', 4000000000), outside = make('خارج از انتخاب', 1000000000);
+  const a = C.addPerson(st, 'الف', 1), b = C.addPerson(st, 'ب', 1); C.setEstateEqualWeights(st, e.id, [a.id, b.id]); C.setHolder(st, p1.id, a.id, true);
+  const plan = C.automaticAllocationPlan(st, { selectedIds: [p1.id, p2.id], mode: 'equal_value', preserveExisting: true });
+  ok(plan.ok && !plan.requiresInput); eq(plan.whole.length, 1); eq(plan.whole[0].personId, b.id); eq(outside.holderId, null);
+  const applied = C.applyAutomaticAllocation(st, plan); ok(applied.ok); eq(p2.holderId, b.id); eq(outside.holderId, null);
+});
+t('تخصیص خودکار: ملک بزرگ ابتدا سؤال متری/درصدی/نقدی می‌سازد و بعد از تأیید قابل برش است', () => {
+  const st = C.newState(); const e = C.addEstate(st, 'اموال برشی');
+  const p = C.newParcel({ name: 'ملک بزرگ', scope: 'rural_outside', grade: 'grade1', areaComputed: 10000, estateId: e.id, geometry: { ring: sqLL } }); p.pricing.override = 1000000; C.addParcel(st, p);
+  const a = C.addPerson(st, 'الف', 1), b = C.addPerson(st, 'ب', 1); C.setEstateEqualWeights(st, e.id, [a.id, b.id]);
+  let plan = C.automaticAllocationPlan(st, { selectedIds: [p.id], mode: 'equal_value', preserveExisting: true });
+  ok(plan.ok && plan.requiresInput && plan.request.options.indexOf('area') >= 0); plan = C.automaticAllocationPlan(st, { selectedIds: [p.id], mode: 'equal_value', preserveExisting: true, resolutions: { [p.id]: 'area' } });
+  ok(plan.ok && !plan.requiresInput && plan.splits.length === 1); const out = C.applyAutomaticAllocation(st, plan); ok(out.ok); eq(st.parcels.length, 2); ok(st.parcels.every(q => q.holderId === a.id || q.holderId === b.id));
+});
+t('تخصیص خودکار: مشاع فقط با اجازه و تأیید نهایی ثبت می‌شود', () => {
+  const st = C.newState(); const e = C.addEstate(st, 'اموال مشاع');
+  const p = C.newParcel({ name: 'ملک قابل مشاع', scope: 'rural_outside', grade: 'grade1', areaComputed: 10000, estateId: e.id, geometry: { ring: sqLL } }); p.pricing.override = 1000000; C.addParcel(st, p);
+  const a = C.addPerson(st, 'الف', 1), b = C.addPerson(st, 'ب', 1); C.setEstateEqualWeights(st, e.id, [a.id, b.id]);
+  let plan = C.automaticAllocationPlan(st, { selectedIds: [p.id], mode: 'equal_value', allowCoownership: true });
+  ok(plan.requiresInput && plan.request.options.indexOf('coownership') >= 0); plan = C.automaticAllocationPlan(st, { selectedIds: [p.id], mode: 'equal_value', allowCoownership: true, resolutions: { [p.id]: 'coownership' } });
+  ok(plan.ok && plan.coownerships.length === 1); ok(C.applyAutomaticAllocation(st, plan).ok); eq(C.coOwnersOfParcel(st, p).length, 2);
+  const d = C.divisionLive(st, { parcelIds: [p.id], includeUnclassified: true }); eq(C.fToNumber(d.sumHeld), C.fToNumber(d.total)); eq(Math.round(C.fToNumber(d.people[0].heldValue)), Math.round(C.fToNumber(d.total) / 2));
+});
+
 t('تقسیم رندوم فقط انتخاب فعلی را جابه‌جا می‌کند و تسویه‌ی نقدی می‌سازد', () => {
   const st = C.newState(); const e = C.addEstate(st, 'منبع'); const ps = [1, 2, 3, 4].map((n) => { const p = mkParcel({ name: 'رندوم ' + n, scope: 'rural_outside', areaComputed: n * 100, estateId: e.id }); C.addParcel(st, p); return p; });
   const a = C.addPerson(st, 'الف', 1), b = C.addPerson(st, 'ب', 1); C.setEstateEqualWeights(st, e.id, [a.id, b.id]);
