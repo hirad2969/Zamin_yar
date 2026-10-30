@@ -37,7 +37,7 @@ jobs:
         run: sha256sum android/app/build/outputs/apk/debug/app-debug.apk > android/app/build/outputs/apk/debug/app-debug.apk.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: zamin-yar-apk-${{ github.ref_name }}-${{ github.run_number }}
+          name: zamin-yar-apk-${{ github.run_number }}
           path: |
             android/app/build/outputs/apk/debug/app-debug.apk
             android/app/build/outputs/apk/debug/app-debug.apk.sha256

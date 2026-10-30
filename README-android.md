@@ -33,7 +33,7 @@
 گردش‌کار «Build Android APK» در تب Actions روی push هر شاخه و هر PR اجرا می‌شود و APK می‌سازد؛ بنابراین همین شاخه هم بدون Android Studio قابل بررسی است:
 
 1. در مخزن، تب **Actions** ← گردش‌کار **Build Android APK** ← آخرین اجرای سبز روی `main` را باز کنید.
-2. پایین صفحه، در بخش **Artifacts**، فایل با نامی مانند `zamin-yar-apk-arena-...` را دانلود کنید (zip شامل `app-debug.apk` و `app-debug.apk.sha256`).
+2. پایین صفحه، در بخش **Artifacts**، فایل با نامی مانند `zamin-yar-apk-41118330265` را دانلود کنید (zip شامل `app-debug.apk` و `app-debug.apk.sha256`).
 3. zip را باز کنید و `app-debug.apk` را روی گوشی نصب کنید (اجازه‌ی «نصب از منبع ناشناس»).
 
 نکته‌ها:
