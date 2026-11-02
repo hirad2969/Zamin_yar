@@ -3,7 +3,7 @@
   'use strict';
   const App = window.App, el = App.el, M = App.map, LD = window.LandDetect;
   const AD = App.detect = { active: false, st: null };
-  const ZOOMS = [18, 17, 16];       // اگر زمین از پنجره بزرگ‌تر بود، یک پله دورتر می‌رویم
+  const ZOOMS = [18, 17, 16, 15];       // اگر زمین از پنجره بزرگ‌تر بود، یک پله دورتر می‌رویم
   const WIN = 1024;                 // پنجره‌ی تحلیل (پیکسل)
   let busy = false;
 
@@ -64,12 +64,16 @@
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && AD.active) AD.cancel(); });
   });
 
+  /** بارگذاری یک کاشی؛ تا ۳ بار تلاش می‌کند (بار دوم و سوم با پارامتر ضدکش تا اگر پاسخ ناقص/بدون CORS در کش مانده بود دوباره گرفته شود) */
   function loadTile(z, x, y) {
-    return new Promise((res) => {
+    const base = M.SAT_URL.replace('{z}', z).replace('{y}', y).replace('{x}', x);
+    const once = (n) => new Promise((res) => {
       const im = new Image(); im.crossOrigin = 'anonymous';
-      im.onload = () => res(im); im.onerror = () => res(null);
-      im.src = M.SAT_URL.replace('{z}', z).replace('{y}', y).replace('{x}', x);
+      const to = setTimeout(() => { im.onload = im.onerror = null; res(null); }, 12000);
+      im.onload = () => { clearTimeout(to); res(im); }; im.onerror = () => { clearTimeout(to); res(null); };
+      im.src = n ? base + (base.indexOf('?') < 0 ? '?' : '&') + 'zy=' + Date.now() + n : base;
     });
+    return (async () => { for (let n = 0; n < 3; n++) { const im = await once(n); if (im) return im; await new Promise(r => setTimeout(r, 250 * (n + 1))); } return null; })();
   }
   const tick = () => new Promise(r => setTimeout(r, 30));
 
@@ -94,7 +98,7 @@
     busy = true;
     say([el('b', { text: '⏳ در حال تحلیل تصویر ماهواره‌ای…' })]);
     await tick();
-    let last = null;
+    let last = null, tileFail = null;
     try {
       const est = hintM2();
       const mpp = (z) => 156543.03392804097 * Math.cos(latlng.lat * Math.PI / 180) / Math.pow(2, z);
@@ -103,7 +107,14 @@
       if (est) { startZi = ZOOMS.findIndex(z => est / (mpp(z) * mpp(z)) <= 0.3 * WIN * WIN); if (startZi < 0) startZi = ZOOMS.length - 1; }
       for (let zi = startZi; zi < ZOOMS.length; zi++) {
         const z = ZOOMS[zi];
-        const g = await grab(latlng, z); await tick();
+        let g;
+        try { g = await grab(latlng, z); }
+        catch (e) {
+          // کاشی این زوم در دسترس نیست (مثلاً تصویر آن‌قدر نزدیک ندارد) ⇒ زوم دورتر
+          if (/tiles/.test(e.message) && zi < ZOOMS.length - 1) { tileFail = e; say([el('b', { text: '⏳ تصویر این بزرگنمایی موجود نیست؛ با بزرگنمایی کمتر تلاش می‌شود…' })]); await tick(); continue; }
+          throw e;
+        }
+        await tick();
         const det = LD.prepare(g.img, { x: WIN / 2, y: WIN / 2 });
         const targetPx = est ? est / (mpp(z) * mpp(z)) : null;
         let r = est ? det.byArea(targetPx) : det.autoStable();
@@ -114,10 +125,11 @@
       }
     } catch (e) {
       busy = false;
-      const msg = /cors/.test(e.message) ? 'سرویس نقشه اجازه‌ی خواندن تصویر برای تحلیل را نداد.' : /tiles/.test(e.message) ? 'کاشی‌های نقشه بارگذاری نشد (اینترنت یا سرویس نقشه در دسترس نیست). تشخیص خودکار نیازمند اینترنت است.' : 'خطا در تحلیل: ' + e.message;
+      const msg = /cors/.test(e.message) ? 'سرویس نقشه اجازه‌ی خواندن تصویر برای تحلیل را نداد.' : /tiles/.test(e.message) ? 'کاشی‌های ماهواره‌ای بارگذاری نشد (' + e.message.replace('tiles:', '') + ' کاشی). اینترنت را بررسی کنید و دوباره لمس کنید؛ تشخیص خودکار نیازمند اینترنت است.' : 'خطا در تحلیل: ' + e.message;
       App.toast(msg, 'err'); waiting(splitHint()); return;
     }
     busy = false;
+    if (!last) { App.toast('کاشی‌های ماهواره‌ای در این محل بارگذاری نشد (اینترنت قطع است یا سرویس نقشه تصویر این منطقه را ندارد). اینترنت را بررسی کنید یا مرز را دستی بکشید.', 'err'); waiting(splitHint()); return; }
     const r = last.r;
     if (!r.ok) {
       App.toast(r.reason === 'small' ? 'ناحیه‌ی همرنگ اطراف این نقطه خیلی کوچک است. نقطه‌ی دیگری از داخل زمین را لمس کنید یا مرز را دستی بکشید.' : 'مرز مشخصی تشخیص داده نشد. اگر مرز روی عکس نشانه‌ای ندارد، مرز کل زمین را بکشید و با «تقسیم به دو قسمت با متراژ مشخص» قسمت موردنظر را جدا کنید.', 'warn');

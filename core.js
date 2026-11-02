@@ -1640,7 +1640,15 @@
     state.persons = state.persons.filter(x => x.id !== personId);
     (state.parcels || []).forEach(p => { if (p.holderId === personId) p.holderId = null; });
     if (state.adjust) delete state.adjust[personId];
-    if (state.house) { if (state.house.payer === personId) state.house.payer = ''; state.house.receivers = (state.house.receivers || []).filter(id => id !== personId); }
+    (state.persons || []).filter(x => x.parentId === personId).forEach(k => { (state.parcels || []).forEach(p => { if (p.holderId === k.id) p.holderId = null; }); if (state.adjust) delete state.adjust[k.id]; });
+    state.persons = (state.persons || []).filter(x => x.parentId !== personId);
+    if (state.house) {
+      if (state.house.payer === personId) state.house.payer = '';
+      state.house.receivers = (state.house.receivers || []).filter(id => id !== personId);
+      if (state.house.sellers) state.house.sellers = state.house.sellers.filter(id => id !== personId);
+      if (state.house.buyers) state.house.buyers = state.house.buyers.filter(id => id !== personId);
+      if (state.house.buyerShares) delete state.house.buyerShares[personId];
+    }
     (state.estates || []).forEach(e => { if (e.weights) delete e.weights[personId]; });
     (state.scenarios || []).forEach(sc => {
       Object.keys(sc.allocations || {}).forEach(k => {
@@ -1982,27 +1990,63 @@
   }
 
   /* ---------------------------------------------------------------- */
-  /* تقسیم زنده: همه‌چیز مستقیم از «دسته‌ی هر زمین» و «دست کی بودن» حساب می‌شود */
-  /* هیچ فهرست یا عدد حفظ‌شده‌ای وجود ندارد؛ با هر تغییر، همه‌چیز از نو محاسبه می‌شود */
+  /* تقسیم زنده (نسخه‌ی ۲): همه‌چیز از «متراژ × قیمت هر متر» شروع می‌شود و با هر تغییر از نو حساب می‌شود.
+     هیچ ارزش یا نتیجه‌ی حفظ‌شده‌ای در محاسبه دخیل نیست. */
   /* ---------------------------------------------------------------- */
-  const parcelValueF = (p) => frac(Math.round((p && p.valuation && isFinite(p.valuation.total) && p.valuation.total) || 0));
-  /** کسی که زمین‌هایش قابل خرید است (کسی که در «خانه‌ی شهر» بدهکار است) */
-  const sellerId = (state) => (state.house && state.house.payer) || '';
-  /** دست چه کسی است؟ شناسه‌ی نامعتبر = آزاد */
-  function holderOfParcel(state, p) {
-    return (p && p.holderId && (state.persons || []).some(x => x.id === p.holderId)) ? p.holderId : '';
+  /** متراژ و قیمت و ارزش زنده‌ی یک زمین (متراژ دستی > متراژ مرز؛ قیمت دستی > قیمت ثبت‌شده) */
+  function parcelLive(p) {
+    const v = (p && p.valuation) || {};
+    const ov = p && isNum(p.areaOverride) && p.areaOverride > 0 ? p.areaOverride : null;
+    const area = ov != null ? ov : (p && isNum(p.areaComputed) && p.areaComputed > 0 ? p.areaComputed : (isNum(v.area) && v.area > 0 ? v.area : 0));
+    const po = p && p.pricing && isNum(p.pricing.override) && p.pricing.override >= 0 ? p.pricing.override : null;
+    const price = po != null ? po : (isNum(v.pricePerM2) && v.pricePerM2 >= 0 ? v.pricePerM2 : 0);
+    return { area, price, total: Math.round(area * price) };
   }
-  /** آیا شخص می‌تواند این زمین را بردارد؟ فقط زمینِ فروشنده یا زمین آزاد (خارج‌شده از لیست کسی) */
+  const parcelValueF = (p) => frac(parcelLive(p).total);
+  /** آیا زمین در «فهرست تقسیم» است؟ (فیلتر محدوده/درجه/ویژه + تیک‌های موردی) */
+  function inPool(state, p) {
+    const pl = state.pool || {};
+    if ((pl.off || []).indexOf(p.id) >= 0) return false;
+    if ((pl.on || []).indexOf(p.id) >= 0) return true;
+    if (Array.isArray(pl.scopes) && pl.scopes.indexOf(p.scope) < 0) return false;
+    if (Array.isArray(pl.grades) && pl.grades.indexOf(p.grade) < 0) return false;
+    if (Array.isArray(pl.specials) && pl.specials.indexOf(p.special ? 'special' : 'normal') < 0) return false;
+    return true;
+  }
+  /** ریشه‌ها (چهار سهم اصلی) و زیرمجموعه‌ها؛ «برگ‌ها» همان کسانی‌اند که زمین دستشان می‌ماند */
+  function personTree(state) {
+    const ps = state.persons || [], ids = {}; ps.forEach(p => { ids[p.id] = true; });
+    const kids = {}, roots = [];
+    ps.forEach(p => { if (p.parentId && ids[p.parentId] && p.parentId !== p.id) (kids[p.parentId] = kids[p.parentId] || []).push(p); else roots.push(p); });
+    const leaves = [], rootOf = {};
+    roots.forEach(r => { const k = kids[r.id] || []; if (k.length) k.forEach(c => { leaves.push(c); rootOf[c.id] = r.id; }); else { leaves.push(r); rootOf[r.id] = r.id; } });
+    return { roots, kids, leaves, rootOf, leafIds: leaves.reduce((o, x) => (o[x.id] = true, o), {}) };
+  }
+  /** خانه‌ی شهر با چند فروشنده و چند خریدار: هر فروشنده «مبلغ» می‌گیرد؛ جمع پرداختی را خریداران به نسبت سهمشان می‌دهند */
+  function houseNormal(state) {
+    const h = state.house || {};
+    return { amount: h.amount, sellers: (h.sellers || h.receivers || []).slice(), buyers: (h.buyers || (h.payer ? [h.payer] : [])).slice(), buyerShares: h.buyerShares || {} };
+  }
+  /** خریداران خانه = کسانی که زمین‌هایشان برای بقیه قابل برداشتن است (شناسه‌ی ریشه‌ها) */
+  const sellerId = (state) => houseNormal(state).buyers[0] || '';
+  const buyerIds = (state) => houseNormal(state).buyers;
+  function holderOfParcel(state, p, tree) {
+    const t = tree || personTree(state);
+    return (p && p.holderId && t.leafIds[p.holderId]) ? p.holderId : '';
+  }
   function canTake(state, parcelId, personId) {
     const p = (state.parcels || []).find(x => x.id === parcelId);
     if (!p) return { ok: false, reason: 'زمین پیدا نشد' };
-    const cur = holderOfParcel(state, p);
-    if (!personId || cur === personId) return { ok: true };
-    if (!cur || cur === sellerId(state)) return { ok: true };
+    const t = personTree(state), cur = holderOfParcel(state, p, t);
+    if (personId && !t.leafIds[personId]) return { ok: false, reason: 'برای این شخص زیرمجموعه تعریف شده؛ یکی از اعضا را انتخاب کنید' };
+    if (cur === (personId || '')) return { ok: true };
+    if (p.locked && cur) return { ok: false, reason: 'این زمین قفل است (برای شخص خاصی ثبت شده)؛ اول قفلش را باز کنید' };
+    if (!personId || !cur) return { ok: true };
+    if (t.rootOf[cur] === t.rootOf[personId]) return { ok: true };                 // جابه‌جایی داخل یک خانواده
+    if (buyerIds(state).indexOf(t.rootOf[cur]) >= 0) return { ok: true };         // زمین خریدارِ خانه
     const o = (state.persons || []).find(x => x.id === cur);
     return { ok: false, reason: 'این زمین دست «' + (o ? o.name : '؟') + '» است؛ تا او آزادش نکند قابل خرید نیست' };
   }
-  /** تغییر «دست کی»؛ force برای ثبت اولیه‌ی زمین (بدون محدودیت) */
   function setHolder(state, parcelId, personId, force) {
     const p = (state.parcels || []).find(x => x.id === parcelId);
     if (!p) return { ok: false, reason: 'زمین پیدا نشد' };
@@ -2011,57 +2055,297 @@
     p.holderId = personId || null;
     return { ok: true };
   }
+  /** افزودن زیرمجموعه به یک سهم اصلی؛ زمین‌های دستِ آن شخص به عضو اول منتقل می‌شود (قفل‌ها حفظ می‌شود) */
+  function addSubPerson(state, parentId, name, share) {
+    const par = (state.persons || []).find(x => x.id === parentId);
+    if (!par || par.parentId) return null;
+    const hadKids = (state.persons || []).some(x => x.parentId === parentId);
+    const c = addPerson(state, name || 'عضو', 1);
+    c.parentId = parentId; c.subShare = share == null ? '1' : String(share);
+    if (!hadKids) (state.parcels || []).forEach(p => { if (p.holderId === parentId) p.holderId = c.id; });
+    return c;
+  }
+  /** حذف یک زیرمجموعه؛ زمین‌هایش به عضو دیگر (یا خودِ شخص اصلی اگر عضوی نماند) می‌رود */
+  function removeSubPerson(state, childId) {
+    const c = (state.persons || []).find(x => x.id === childId); if (!c || !c.parentId) return;
+    const sibs = state.persons.filter(x => x.parentId === c.parentId && x.id !== childId);
+    const to = sibs.length ? sibs[0].id : c.parentId;
+    (state.parcels || []).forEach(p => { if (p.holderId === childId) p.holderId = to; });
+    state.persons = state.persons.filter(x => x.id !== childId);
+    if (state.adjust) delete state.adjust[childId];
+  }
+  function subShareF(p) { const f = p && p.subShare != null && p.subShare !== '' ? toFrac(p.subShare) : null; return f && fSign(f) > 0 ? f : F1(); }
+
+  function cashPlan(items) {
+    const cr = items.filter(x => fSign(x.rem) > 0).map(x => ({ id: x.id, rem: x.rem })).sort((a, b) => fCmp(b.rem, a.rem));
+    const de = items.filter(x => fSign(x.rem) < 0).map(x => ({ id: x.id, rem: fNeg(x.rem) })).sort((a, b) => fCmp(b.rem, a.rem));
+    const out = []; let i = 0, j = 0;
+    while (i < de.length && j < cr.length) {
+      const amt = fCmp(de[i].rem, cr[j].rem) <= 0 ? de[i].rem : cr[j].rem;
+      out.push({ from: de[i].id, to: cr[j].id, amount: amt });
+      de[i].rem = fSub(de[i].rem, amt); cr[j].rem = fSub(cr[j].rem, amt);
+      if (fSign(de[i].rem) === 0) i++; if (fSign(cr[j].rem) === 0) j++;
+    }
+    return out;
+  }
+
   /**
    * محاسبه‌ی کامل با کسر دقیق:
-   *  حق از هر دسته = ارزش دسته × (وزن شخص ÷ جمع وزن‌ها)
-   *  اعتبار = جمع حق‌ها + خانه‌ی شهر + «سایر» ؛ مانده = اعتبار − ارزش زمین‌های دستش
+   *  حق هر ریشه از هر دسته = ارزش دسته × (ضریب ÷ جمع ضریب‌ها)
+   *  اعتبار ریشه = جمع حق‌ها + خانه‌ی شهر + «سایر»؛ زیرمجموعه‌ها به نسبت سهمشان از اعتبار ریشه می‌برند
+   *  مانده = اعتبار − ارزش زمین‌های دستش
    */
   function divisionLive(state) {
-    const persons = state.persons || [], parcels = state.parcels || [], estates = state.estates || [];
-    const errors = [], warns = [];
-    const pid = (x) => x.id;
+    const parcelsAll = state.parcels || [], estates = state.estates || [];
+    const tree = personTree(state), errors = [], warns = [];
+    const parcels = parcelsAll.filter(p => inPool(state, p));
+    const outOfPool = parcelsAll.length - parcels.length;
     const gid = (p) => p.estateId && estates.some(e => e.id === p.estateId) ? p.estateId : '';
-    // دسته‌ها
+    const rp = { persons: tree.roots, estates };
     const cats = estates.map(e => {
       const ps = parcels.filter(p => gid(p) === e.id);
       let V = F0(), area = 0;
-      ps.forEach(p => { V = fAdd(V, parcelValueF(p)); area += (p.valuation && p.valuation.area) || 0; });
-      const w = estateWeights(state, e.id);
-      const shares = persons.map((x, i) => (fSign(w.sum) > 0 ? fDiv(w.weights[i], w.sum) : F0()));
+      ps.forEach(p => { V = fAdd(V, parcelValueF(p)); area += parcelLive(p).area; });
+      const w = estateWeights(rp, e.id);
+      const shares = tree.roots.map((x, i) => (fSign(w.sum) > 0 ? fDiv(w.weights[i], w.sum) : F0()));
       if (ps.length && fSign(w.sum) <= 0) errors.push('برای دسته‌ی «' + e.name + '» سهمی ثبت نشده است');
       return { id: e.id, name: e.name, count: ps.length, area, value: V, weights: w.weights, weightSum: w.sum, usedDefault: w.usedDefault, shares };
     });
     const unc = parcels.filter(p => !gid(p));
     let uncV = F0(); unc.forEach(p => { uncV = fAdd(uncV, parcelValueF(p)); });
     if (unc.length) warns.push(unc.length + ' زمین «دسته‌بندی‌نشده» است و در هیچ سهمی حساب نمی‌شود');
-    // خانه‌ی شهر
-    const h = state.house || {};
+    // خانه‌ی شهر (چند فروشنده و چند خریدار)
+    const hn = houseNormal(state), rootIds = tree.roots.map(r => r.id);
     let amount = F0();
-    if (h.amount != null && h.amount !== '') { amount = parseAdjust(h.amount); if (!amount) { errors.push('مبلغ خانه‌ی شهر نامعتبر است'); amount = F0(); } }
-    const recv = (h.receivers || []).filter(id => persons.some(x => x.id === id));
-    const houseOf = (id) => recv.indexOf(id) >= 0 ? amount : (id === h.payer ? fNeg(fMul(amount, frac(recv.length))) : F0());
-    // نفرات
-    const people = persons.map((x, i) => {
+    if (hn.amount != null && hn.amount !== '') { amount = parseAdjust(hn.amount); if (!amount) { errors.push('مبلغ خانه‌ی شهر نامعتبر است'); amount = F0(); } }
+    const sellers = hn.sellers.filter(id => rootIds.indexOf(id) >= 0), buyers = hn.buyers.filter(id => rootIds.indexOf(id) >= 0);
+    const houseTotal = fMul(amount, frac(sellers.length));
+    let bw = buyers.map(id => { const f = hn.buyerShares[id] != null && hn.buyerShares[id] !== '' ? toFrac(hn.buyerShares[id]) : F1(); return f && fSign(f) > 0 ? f : F1(); });
+    let bsum = F0(); bw.forEach(f => { bsum = fAdd(bsum, f); });
+    const houseOf = (id) => {
+      let v = F0();
+      if (sellers.indexOf(id) >= 0) v = fAdd(v, amount);
+      const bi = buyers.indexOf(id); if (bi >= 0 && fSign(bsum) > 0) v = fSub(v, fMul(houseTotal, fDiv(bw[bi], bsum)));
+      return v;
+    };
+    if (sellers.length && !buyers.length && fSign(amount) !== 0) warns.push('خانه‌ی شهر: فروشنده انتخاب شده ولی خریداری نیست');
+    // ریشه‌ها
+    const groups = tree.roots.map((x, i) => {
       let ent = F0(); const parts = cats.map(c => { const v = fMul(c.value, c.shares[i]); ent = fAdd(ent, v); return { id: c.id, name: c.name, weight: c.weights[i], share: c.shares[i], value: v }; });
       const hf = houseOf(x.id);
       let adj = parseAdjust((state.adjust || {})[x.id]);
       if (!adj) { errors.push('مبلغ «سایر» ' + x.name + ' نامعتبر است'); adj = F0(); }
-      const credit = fAdd(fAdd(ent, hf), adj);
-      const held = parcels.filter(p => holderOfParcel(state, p) === x.id);
-      let heldV = F0(), heldArea = 0; held.forEach(p => { heldV = fAdd(heldV, parcelValueF(p)); heldArea += (p.valuation && p.valuation.area) || 0; });
-      const remaining = fSub(credit, heldV);
-      return { person: x, parts, entitlement: ent, house: hf, adjust: adj, credit, held, heldValue: heldV, heldArea, remaining, remainingNum: fToNumber(remaining) };
+      return { root: x, parts, entitlement: ent, house: hf, adjust: adj, credit: fAdd(fAdd(ent, hf), adj) };
+    });
+    // برگ‌ها (ریشه‌ی بدون زیرمجموعه یا هر عضو)
+    const people = [];
+    groups.forEach(g => {
+      const kids = tree.kids[g.root.id] || [];
+      const members = kids.length ? kids : [g.root];
+      let ssum = F0(); const ss = members.map(m => (kids.length ? subShareF(m) : F1())); ss.forEach(f => { ssum = fAdd(ssum, f); });
+      g.members = [];
+      members.forEach((m, k) => {
+        const f = fDiv(ss[k], ssum), isSub = !!kids.length;
+        let own = F0();
+        if (isSub) { own = parseAdjust((state.adjust || {})[m.id]); if (!own) { errors.push('مبلغ «سایر» ' + m.name + ' نامعتبر است'); own = F0(); } }
+        const parts = g.parts.map(pt => ({ id: pt.id, name: pt.name, weight: pt.weight, share: fMul(pt.share, f), value: fMul(pt.value, f) }));
+        const ent = fMul(g.entitlement, f), hf = fMul(g.house, f), adj = fAdd(fMul(g.adjust, f), own);
+        const credit = fAdd(fAdd(ent, hf), adj);
+        const held = parcels.filter(p => holderOfParcel(state, p, tree) === m.id);
+        let heldV = F0(), heldArea = 0; held.forEach(p => { heldV = fAdd(heldV, parcelValueF(p)); heldArea += parcelLive(p).area; });
+        const remaining = fSub(credit, heldV);
+        const row = { person: m, root: g.root, isSub, subShare: f, parts, entitlement: ent, house: hf, adjust: adj, credit, held, heldValue: heldV, heldArea, remaining, remainingNum: fToNumber(remaining) };
+        people.push(row); g.members.push(row);
+      });
+      g.heldValue = g.members.reduce((s, r) => fAdd(s, r.heldValue), F0());
+      g.remaining = fSub(g.credit, g.heldValue);
+      g.creditAll = g.members.reduce((s, r) => fAdd(s, r.credit), F0());
     });
     let total = F0(); parcels.forEach(p => { total = fAdd(total, parcelValueF(p)); });
-    const free = parcels.filter(p => !holderOfParcel(state, p));
+    const free = parcels.filter(p => !holderOfParcel(state, p, tree));
     let freeV = F0(); free.forEach(p => { freeV = fAdd(freeV, parcelValueF(p)); });
     let sumAdj = F0(), sumRem = F0(), sumCredit = F0(), sumHeld = F0(), sumEnt = F0();
     people.forEach(r => { sumAdj = fAdd(sumAdj, fAdd(r.house, r.adjust)); sumRem = fAdd(sumRem, r.remaining); sumCredit = fAdd(sumCredit, r.credit); sumHeld = fAdd(sumHeld, r.heldValue); sumEnt = fAdd(sumEnt, r.entitlement); });
-    if (fSign(sumAdj) !== 0) warns.push('جمع «خانه‌ی شهر + سایر» صفر نیست (' + fToNumber(sumAdj).toLocaleString('en') + ' تومان)؛ یعنی کسی طلب یا بدهی بی‌طرف دارد');
-    if (fSign(uncV) === 0 && persons.length && fSign(sumRem) !== 0 && !free.length && fSign(sumAdj) === 0) errors.push('خطای حساب: همه‌ی زمین‌ها دست کسی است و جمع مانده‌ها صفر نشد');
-    // مانده‌ها وقتی همه‌ی زمین‌ها برداشته شده و تعدیل‌ها متوازن است باید دقیقاً جمعشان صفر شود
-    return { cats, people, total, free, freeValue: freeV, unclassified: unc, unclassifiedValue: uncV, sumEntitlement: sumEnt, sumCredit, sumHeld, sumAdjust: sumAdj, sumRemaining: sumRem, errors, warns, seller: sellerId(state), house: { amount, receivers: recv, payer: h.payer || '' } };
+    if (fSign(sumAdj) !== 0) warns.push('جمع «خانه‌ی شهر + سایر» صفر نیست (' + Math.round(fToNumber(sumAdj)).toLocaleString('en') + ' تومان)؛ یعنی کسی طلب یا بدهی بی‌طرف دارد');
+    if (outOfPool) warns.push(outOfPool + ' زمین بیرون از «فهرست تقسیم» است و در هیچ حسابی نیست');
+    const settlement = cashPlan(people.map(r => ({ id: r.person.id, rem: r.remaining })));
+    return { cats, people, groups, total, free, freeValue: freeV, unclassified: unc, unclassifiedValue: uncV, sumEntitlement: sumEnt, sumCredit, sumHeld, sumAdjust: sumAdj, sumRemaining: sumRem, errors, warns, settlement,
+      poolCount: parcels.length, outOfPool, seller: sellerId(state), buyers, sellers, house: { amount, total: houseTotal, sellers, buyers, receivers: sellers, payer: buyers[0] || '' } };
   }
+
+  /* ---------------------------------------------------------------- */
+  /* تقسیم خودکار متوازن: کمینه‌کردن جمع |مانده‌ها| (یعنی کمترین طلب/بدهی نقدی)      */
+  /* ---------------------------------------------------------------- */
+  function lcg(seed) { let s = seed >>> 0; return () => (s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296; }
+  /**
+   * جست‌وجوی محلی (انتقال و جابه‌جایی) روی اعداد؛ نتیجه‌ی نهایی همیشه با «کسر دقیق» دوباره حساب می‌شود.
+   * people: [{id, credit}]  items: [{id, value, cur, locked}]
+   * mode: 'free' فقط زمین‌های آزاد | 'compensate' آزادها + حداکثر maxMoves جابه‌جایی برای جبران | 'reset' همه به‌جز قفل‌ها
+   */
+  function balanceSearch(people, items, mode, maxMoves) {
+    const n = people.length, idx = {}; people.forEach((p, i) => { idx[p.id] = i; });
+    const credit = people.map(p => p.credit), fixed = new Array(n).fill(0), mov = [];
+    items.forEach(it => {
+      const ci = it.cur != null && idx[it.cur] != null ? idx[it.cur] : -1;
+      if (ci >= 0 && (it.locked || mode !== 'reset')) { if (mode === 'compensate' && !it.locked) mov.push({ id: it.id, v: it.value, from: ci, semi: true }); else fixed[ci] += it.value; return; }
+      mov.push({ id: it.id, v: it.value, from: ci, semi: false });
+    });
+    const load = (as, semiIn) => { const L = fixed.slice(); mov.forEach((m, k) => { if (m.semi && !semiIn.has(k)) L[m.from] += m.v; else L[as[k]] += m.v; }); return L; };
+    const obj = (L) => { let s = 0; for (let i = 0; i < n; i++) s += Math.abs(credit[i] - L[i]); return s; };
+    function localSearch(as, active) {              // active: اندیس‌های قابل‌حرکت
+      const L = fixed.slice();
+      mov.forEach((m, k) => { L[active.has(k) ? as[k] : m.from] += m.v; });
+      let cur = obj(L);
+      for (let iter = 0; iter < 4000; iter++) {
+        let bestGain = 1e-9, bm = null;
+        const arr = Array.from(active);
+        for (const k of arr) {
+          const a = as[k], v = mov[k].v;
+          for (let b = 0; b < n; b++) if (b !== a) {
+            const na = Math.abs(credit[a] - (L[a] - v)) + Math.abs(credit[b] - (L[b] + v)) - Math.abs(credit[a] - L[a]) - Math.abs(credit[b] - L[b]);
+            if (-na > bestGain) { bestGain = -na; bm = [k, b, -1]; }
+          }
+        }
+        for (let x = 0; x < arr.length; x++) for (let y = x + 1; y < arr.length; y++) {
+          const k = arr[x], l = arr[y], a = as[k], b = as[l]; if (a === b) continue;
+          const d = mov[k].v - mov[l].v; if (d === 0) continue;
+          const na = Math.abs(credit[a] - (L[a] - d)) + Math.abs(credit[b] - (L[b] + d)) - Math.abs(credit[a] - L[a]) - Math.abs(credit[b] - L[b]);
+          if (-na > bestGain) { bestGain = -na; bm = [k, b, l]; }
+        }
+        if (!bm) break;
+        const [k, b, l] = bm, a = as[k];
+        if (l < 0) { L[a] -= mov[k].v; L[b] += mov[k].v; as[k] = b; }
+        else { const a2 = as[l]; L[a] -= mov[k].v - mov[l].v; L[a2] += mov[k].v - mov[l].v; as[k] = a2; as[l] = a; }
+        cur -= bestGain;
+      }
+      return as;
+    }
+    const freeIdx = new Set(); mov.forEach((m, k) => { if (!m.semi) freeIdx.add(k); });
+    const rnd = lcg(12345);
+    const greedy = (order) => {
+      const L = fixed.slice(), as = new Array(mov.length).fill(0);
+      mov.forEach((m, k) => { if (m.semi) { as[k] = m.from; } });
+      // کسانی که هنوز «کمبود» دارند اولویت دارند (LPT)
+      order.forEach(k => { if (!freeIdx.has(k)) return; let bi = 0, bv = -Infinity; for (let i = 0; i < n; i++) { const r = credit[i] - L[i]; if (r > bv) { bv = r; bi = i; } } as[k] = bi; L[bi] += mov[k].v; });
+      return as;
+    };
+    const ord0 = Array.from(freeIdx).sort((a, b) => mov[b].v - mov[a].v);
+    let best = null, bestObj = Infinity;
+    const consider = (as) => {
+      const o = obj(load(as, new Set()));
+      const ch = mov.reduce((s, m, k) => s + (m.from >= 0 && as[k] !== m.from ? 1 : 0), 0);
+      const sc = o + ch * 1e-6;
+      if (sc < bestObj) { bestObj = sc; best = as.slice(); }
+    };
+    consider(localSearch(greedy(ord0), freeIdx));
+    const R = freeIdx.size > 40 ? 40 : 90;
+    for (let r = 0; r < R && freeIdx.size > 1; r++) {
+      const as = best.slice();
+      Array.from(freeIdx).forEach(k => { if (rnd() < 0.3) as[k] = Math.floor(rnd() * n); });
+      consider(localSearch(as, freeIdx));
+    }
+    let as = best;
+    if (mode === 'compensate') {
+      // جبران: چند جابه‌جایی کم برای نزدیک‌کردن مانده‌ها (از اضافه‌دارها به کم‌دارها)
+      const semi = mov.map((m, k) => m.semi ? k : -1).filter(k => k >= 0);
+      const totalCredit = credit.reduce((a, b) => a + Math.abs(b), 0) || 1, minGain = totalCredit * 0.002;
+      const active = new Set(freeIdx); let used = 0; const moved = new Set();
+      for (let step = 0; step < (maxMoves == null ? 10 : maxMoves); step++) {
+        let bestG = minGain, bm = null; const base = obj(load(as, new Set([...moved])));
+        for (const k of semi) {
+          if (moved.has(k)) continue;
+          for (let b = 0; b < n; b++) if (b !== mov[k].from) {
+            const as2 = as.slice(); as2[k] = b; const mv2 = new Set([...moved, k]);
+            const L2 = load(as2, mv2); const g0 = base - obj(L2);
+            if (g0 > bestG) { bestG = g0; bm = [k, b]; }
+          }
+        }
+        if (!bm) break;
+        moved.add(bm[0]); as[bm[0]] = bm[1]; used++;
+        // آزادها دوباره با وضعیت تازه بهینه می‌شوند
+        const L = (() => { const t = fixed.slice(); mov.forEach((m, k) => { if (m.semi) t[moved.has(k) ? as[k] : m.from] += m.v; }); return t; })();
+        // بازبهینه‌سازی آزادها با بار ثابتِ نیمه‌متحرک‌ها
+        const saveFixed = fixed.slice(); for (let i = 0; i < n; i++) fixed[i] = L[i];
+        const as3 = localSearch(as.slice(), freeIdx); for (let i = 0; i < n; i++) fixed[i] = saveFixed[i];
+        freeIdx.forEach(k => { as[k] = as3[k]; });
+      }
+      // خروجی: semi که جابه‌جا نشده‌اند در جای خود می‌مانند
+      mov.forEach((m, k) => { if (m.semi && !moved.has(k)) as[k] = m.from; });
+    }
+    const moves = []; const assign = {};
+    mov.forEach((m, k) => { const to = people[as[k]].id; assign[m.id] = to; const from = m.from >= 0 ? people[m.from].id : null; if (from !== to) moves.push({ parcelId: m.id, from, to, value: m.v }); });
+    const L = fixed.slice(); mov.forEach((m, k) => { L[as[k]] += m.v; });
+    return { assign, moves, objective: obj(L), residual: people.map((p, i) => ({ id: p.id, rem: credit[i] - L[i] })) };
+  }
+  /**
+   * طرح تقسیم خودکار روی وضعیت فعلی (بدون تغییر state). scope.rootId: فقط بین اعضای یک خانواده و فقط زمین‌های همان خانواده.
+   * زمین‌های قفل‌شده هرگز جابه‌جا نمی‌شوند.
+   */
+  function balancePlan(state, opts) {
+    opts = opts || {};
+    const d = divisionLive(state), tree = personTree(state);
+    let people = d.people, mode = opts.mode || 'free';
+    let pool = state.parcels.filter(p => inPool(state, p));
+    if (opts.rootId) {
+      people = d.people.filter(x => x.root.id === opts.rootId);
+      const ids = {}; people.forEach(x => { ids[x.person.id] = true; });
+      pool = pool.filter(p => ids[holderOfParcel(state, p, tree)]);
+      mode = 'reset';
+    }
+    if (people.length < 2) return { ok: false, error: 'دست‌کم دو نفر لازم است' };
+    const ps = people.map(x => ({ id: x.person.id, credit: fToNumber(x.credit) }));
+    const items = pool.map(p => ({ id: p.id, value: parcelLive(p).total, cur: holderOfParcel(state, p, tree) || null, locked: !!p.locked }));
+    const r = balanceSearch(ps, items, mode, opts.maxMoves);
+    const st2 = clone(state); r.moves.forEach(m => { const p = st2.parcels.find(x => x.id === m.parcelId); if (p) p.holderId = m.to; });
+    // زمین‌هایی که در طرح جابه‌جا نشده‌اند ولی آزادند (برای حالتی که کسی را نمی‌شود پیدا کرد) دست‌نخورده می‌مانند
+    const after = divisionLive(st2);
+    return { ok: true, moves: r.moves, before: d, after, objective: r.objective, state: st2, mode };
+  }
+  function applyPlan(state, plan) {
+    plan.moves.forEach(m => { const p = state.parcels.find(x => x.id === m.parcelId); if (p) p.holderId = m.to; });
+    state.log = state.log || []; state.log.push({ at: nowIso(), msg: 'تقسیم خودکار متوازن: ' + plan.moves.length + ' زمین جابه‌جا/ثبت شد' });
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* بازرسی محاسبات و داده‌ها                                            */
+  /* ---------------------------------------------------------------- */
+  function auditState(state) {
+    const out = [], add = (level, msg, fix) => out.push({ level, msg, fix: fix || null });
+    const d = divisionLive(state);
+    const ps = state.parcels || [];
+    let stale = 0, noArea = 0, noPrice = 0, dup = {}, dups = [];
+    ps.forEach(p => {
+      const lv = parcelLive(p);
+      if (!(lv.area > 0)) noArea++;
+      if (!(lv.price > 0)) noPrice++;
+      if (p.valuation && Math.round(p.valuation.total || 0) !== lv.total) stale++;
+      const k = (p.name || '').replace(/\s+/g, ' ').trim(); if (k) { dup[k] = (dup[k] || 0) + 1; if (dup[k] === 2) dups.push(k); }
+    });
+    add(noArea ? 'err' : 'ok', noArea ? noArea + ' زمین متراژ ندارد' : 'همه‌ی زمین‌ها متراژ دارند');
+    add(noPrice ? 'warn' : 'ok', noPrice ? noPrice + ' زمین قیمت هر متر ندارد' : 'همه‌ی زمین‌ها قیمت دارند');
+    add(stale ? 'warn' : 'ok', stale ? stale + ' زمین ارزشِ ثبت‌شده‌اش با «متراژ × قیمت» فرق دارد (در تقسیم همیشه خودِ ضرب حساب می‌شود)' : 'ارزش ثبت‌شده‌ی همه‌ی زمین‌ها با «متراژ × قیمت» می‌خواند', stale ? 'recalc' : null);
+    if (dups.length) add('warn', 'نام تکراری: ' + dups.slice(0, 4).join('، '));
+    add(d.errors.length ? 'err' : 'ok', d.errors.length ? d.errors.join(' | ') : 'سهم‌بندی دسته‌ها و مبلغ‌ها معتبر است');
+    // معادله‌های ترازنامه (کسر دقیق)
+    const eq1 = fCmp(d.sumEntitlement, fSub(d.total, d.unclassifiedValue)) === 0;
+    add(eq1 ? 'ok' : 'err', eq1 ? '✔ جمع حق‌ها = ارزش زمین‌های دسته‌دار (دقیق، بدون گردکردن)' : '✘ جمع حق‌ها با ارزش زمین‌های دسته‌دار برابر نیست');
+    const eq2 = fCmp(fAdd(d.sumRemaining, d.sumHeld), d.sumCredit) === 0;
+    add(eq2 ? 'ok' : 'err', eq2 ? '✔ جمع مانده‌ها + جمع زمین‌های برداشته‌شده = جمع اعتبارها (دقیق)' : '✘ ترازنامه‌ی مانده‌ها درست نیست');
+    const eq3 = fCmp(d.sumCredit, fAdd(d.sumEntitlement, d.sumAdjust)) === 0;
+    add(eq3 ? 'ok' : 'err', eq3 ? '✔ جمع اعتبارها = جمع حق‌ها + خانه + سایر (دقیق)' : '✘ جمع اعتبارها با حق‌ها + تعدیل‌ها نمی‌خواند');
+    add(fSign(d.sumAdjust) === 0 ? 'ok' : 'warn', fSign(d.sumAdjust) === 0 ? '✔ خانه‌ی شهر و «سایر» متوازن است (جمع صفر)' : 'جمع خانه‌ی شهر و «سایر» صفر نیست (' + Math.round(fToNumber(d.sumAdjust)).toLocaleString('en') + ')');
+    let sub = true; d.groups.forEach(g => { if (g.members.length > 1) { let s = F0(); g.members.forEach(m => { s = fAdd(s, m.entitlement); }); if (fCmp(s, g.entitlement) !== 0) sub = false; } });
+    add(sub ? 'ok' : 'err', sub ? '✔ سهم اعضای هر خانواده = سهم آن خانواده (دقیق)' : '✘ جمع سهم اعضا با سهم خانواده نمی‌خواند');
+    if (d.free.length) add('warn', d.free.length + ' زمین هنوز دست کسی نیست (ارزش ' + Math.round(fToNumber(d.freeValue)).toLocaleString('en') + ')');
+    if (d.unclassified.length) add('warn', d.unclassified.length + ' زمین دسته ندارد');
+    const bad = ps.filter(p => p.holderId && !personTree(state).leafIds[p.holderId]).length;
+    if (bad) add('warn', bad + ' زمین دارندهٔ نامعتبر دارد (آزاد حساب می‌شود)');
+    let over = 0, worst = null; d.people.forEach(r => { if (fSign(r.remaining) < 0 && fToNumber(r.credit) > 0 && -r.remainingNum > fToNumber(r.credit)) { over++; if (!worst) worst = r.person.name; } });
+    if (over) add('warn', over + ' نفر بیش از دو برابر اعتبارشان زمین برداشته‌اند (' + worst + ')');
+    return out;
+  }
+  function removeParcel(state, id) { state.parcels = (state.parcels || []).filter(p => p.id !== id); if (state.pool) { state.pool.off = (state.pool.off || []).filter(x => x !== id); state.pool.on = (state.pool.on || []).filter(x => x !== id); } }
+  function recalcAllValuations(state) { (state.parcels || []).forEach(p => applyValuation(p, state.settings, 'بازمحاسبه‌ی ارزش (بازرسی)')); }
 
   /* ---------------------------------------------------------------- */
   return {
@@ -2088,6 +2372,6 @@
     // پرونده‌ی زنده
     parcelSnap, caseParcels, createCase, convertScenarioToCase, addSection, setSectionWeight, sectionWeightFrac, addDeal, removePerson, evaluateCase, parseAdjust, sectionsFromEstates,
     // تقسیم زنده‌ی ساده (دسته + دست کی)
-    divisionLive, canTake, setHolder, holderOfParcel, sellerId,
+    divisionLive, canTake, setHolder, holderOfParcel, sellerId, buyerIds, parcelLive, inPool, personTree, addSubPerson, removeSubPerson, balancePlan, applyPlan, balanceSearch, cashPlan, auditState, recalcAllValuations, removeParcel, houseNormal,
   };
 });

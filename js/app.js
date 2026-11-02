@@ -14,7 +14,11 @@
     if (!s) return s;
     if (!Array.isArray(s.estates)) s.estates = [];
     if (!Array.isArray(s.persons)) s.persons = [];
-    if (!s.house) s.house = { amount: '', receivers: [], payer: '' };
+    if (!s.house) s.house = { amount: '', sellers: [], buyers: [], buyerShares: {} };
+    if (!s.house.sellers) s.house.sellers = (s.house.receivers || []).slice();      // نسخه‌ی قدیمی: دریافت‌کننده‌ها ⇒ فروشنده‌ها
+    if (!s.house.buyers) s.house.buyers = s.house.payer ? [s.house.payer] : [];       // پرداخت‌کننده ⇒ خریدار
+    if (!s.house.buyerShares) s.house.buyerShares = {};
+    if (!s.pool) s.pool = {};
     if (!s.adjust) s.adjust = {};
     (s.scenarios || []).forEach(sc => { if (sc && !sc.priceBasis) sc.priceBasis = { mode: 'snapshot', level: 'base', version: sc.settingsVersion, factor: 1, ignoreOverride: false }; });
     return s;

@@ -139,7 +139,7 @@ const eq = (a, b, m) => { if (a !== b) throw new Error((m || '') + ' انتظا�
 function setup() {
   const S = w.App.S;
   S.parcels.length = 0; S.persons.length = 0; S.scenarios.length = 0; S.estates = []; S.house = { amount: '', receivers: [], payer: '' }; S.adjust = {};
-  const mk = (name, total, area, est) => { const id = 'SP' + S.parcels.length; S.parcels.push({ id, name, notes: '', estateId: est, holderId: null, scope: 'rural_inside', attrs: {}, grade: 'grade1', special: false, valuation: { area, pricePerM2: Math.round(total / area), total, status: 'قطعی' } }); return id; };
+  const mk = (name, total, area, est) => { const id = 'SP' + S.parcels.length; S.parcels.push({ id, name, notes: '', estateId: est, holderId: null, scope: 'rural_inside', attrs: {}, grade: 'grade1', special: false, valuation: { area, pricePerM2: total / area, total, status: 'قطعی' } }); return id; };
   const E1 = C.addEstate(S, 'دره گرمی'), E2 = C.addEstate(S, 'پدری');
   const a = mk('دره الف', 2100000000, 1000, E1.id), b = mk('پدری ب', 7000000000, 3000, E2.id), c2 = mk('پدری ج', 1000000000, 500, E2.id);
   const M = C.addPerson(S, 'مصطفی', 1), E = C.addPerson(S, 'اسفندیار', 1), A = C.addPerson(S, 'امیر', 1), H = C.addPerson(S, 'مهدی', 1);
@@ -272,6 +272,67 @@ t('تقسیم به چند قسمت: نسبت ۱:۱:۱ ⇒ سه قسمت براب
   const yes = Array.from(doc.querySelectorAll('#modal-root .mf .btn')).find(b => /ثبت شود/.test(b.textContent)); ok(yes, 'تأیید نیست');
   click(yes);
   eq(w.App.S.parcels.length - before, 3, 'سه زمین ثبت نشد');
+});
+
+t('صفحه‌ی تقسیم ۲: ویرایش مساحت و قیمت در لیست ⇒ ارزش و همه‌ی عددها زنده عوض می‌شود', () => {
+  const x = setup();
+  const row = doc.querySelector('#pick-list .prow[data-pid="' + x.a + '"]');
+  change(row.querySelector('.in-area'), '2000');
+  const p = w.App.S.parcels.find(q => q.id === x.a);
+  eq(p.areaOverride, 2000);
+  eq(C.parcelLive(p).total, 2000 * 2100000);
+  has(row.querySelector('.pv').textContent, '۴٬۲۰۰٬۰۰۰٬۰۰۰');
+  change(row.querySelector('.in-price'), '1000000');
+  eq(C.parcelLive(p).total, 2000000000);
+  has(doc.getElementById('cat-table').textContent, '۲٬۰۰۰٬۰۰۰٬۰۰۰');
+});
+t('صفحه‌ی تقسیم ۲: حذف زمین از لیست و فیلتر «در تقسیم»', () => {
+  const x = setup(); const n = w.App.S.parcels.length;
+  const row = doc.querySelector('#pick-list .prow[data-pid="' + x.a + '"]');
+  const ip = row.querySelector('.inpool'); ip.checked = false; change(ip);
+  ok(!C.inPool(w.App.S, w.App.S.parcels.find(p => p.id === x.a)), 'بیرون از تقسیم نشد');
+  has(doc.getElementById('pool-stat').textContent, '۲ از ۳');
+  click(doc.getElementById('pool-all')); has(doc.getElementById('pool-stat').textContent, '۳ از ۳');
+  const f = doc.querySelector('#pool-box input.pf-scopes'); f.checked = false; change(f);
+  has(doc.getElementById('pool-stat').textContent, '۰ از ۳');
+  click(doc.getElementById('pool-all'));
+  click(doc.querySelector('#pick-list .prow[data-pid="' + x.a + '"] .del'));
+  const yes = Array.from(doc.querySelectorAll('#modal-root .mf .btn')).find(b => /حذف/.test(b.textContent)); ok(yes, 'تأیید حذف نیست'); click(yes);
+  eq(w.App.S.parcels.length, n - 1); ok(!doc.querySelector('#pick-list .prow[data-pid="' + x.a + '"]'), 'ردیف نماند');
+});
+t('صفحه‌ی تقسیم ۲: چند خریدار/فروشنده خانه و زیرمجموعه‌ها با تقسیم عادلانه', () => {
+  const x = setup(); const S = w.App.S;
+  const hb = doc.querySelector('#house-box input.hb[data-pid="' + x.A.id + '"]'); hb.checked = true; change(hb);
+  ok(S.house.buyers.indexOf(x.A.id) >= 0, 'خریدار دوم ثبت نشد');
+  const hs = doc.querySelector('#house-box input.hs[data-pid="' + x.H.id + '"]'); hs.checked = true; change(hs);
+  const d = C.divisionLive(S);
+  eq(C.fSign(d.sumAdjust), 0, 'جمع خانه صفر نیست');
+  // زیرمجموعه برای مصطفی
+  const card = () => doc.querySelector('#sum-table .pcard[data-pid="' + x.M.id + '"]');
+  let nm = card().querySelector('.sub-new'); nm.value = 'پدر'; card().querySelector('.sub-new-share').value = '2'; click(card().querySelector('.sub-add'));
+  nm = card().querySelector('.sub-new'); nm.value = 'مادر'; card().querySelector('.sub-new-share').value = '1'; click(card().querySelector('.sub-add'));
+  eq(S.persons.filter(p => p.parentId === x.M.id).length, 2);
+  const dd = C.divisionLive(S), g = dd.groups.find(q => q.root.id === x.M.id);
+  eq(C.fCmp(g.members[0].entitlement, C.fMul(g.entitlement, C.toFrac('2/3'))), 0);
+  // «پدری ج» به عضو اول منتقل شده
+  eq(g.members.reduce((a, m) => a + m.held.length, 0), 1);
+  ok(card().querySelector('.sub-fair'), 'دکمه‌ی تقسیم عادلانه نیست');
+});
+t('صفحه‌ی تقسیم ۲: تقسیم خودکار پیش‌نمایش و اعمال؛ قفل‌ها دست‌نخورده؛ بازرسی و دانلود', () => {
+  const x = setup(); const S = w.App.S;
+  S.parcels.find(p => p.id === x.b).locked = true; w.App.save();
+  w.eval('App.tab("map")'); w.eval('App.tab("people")');
+  const sel = doc.getElementById('auto-mode'); change(sel, 'reset');
+  click(doc.getElementById('auto-run'));
+  ok(doc.getElementById('auto-table'), 'پیش‌نمایش نیامد'); has(doc.getElementById('auto-sum').textContent, 'پیش‌نمایش');
+  click(doc.getElementById('auto-apply'));
+  eq(S.parcels.find(p => p.id === x.b).holderId, x.H.id, 'زمین قفل جابه‌جا شد');
+  const d = C.divisionLive(S); eq(d.free.length, 0, 'آزاد مانده');
+  ok(doc.getElementById('audit-sum'), 'پنل بازرسی نیست');
+  ok(doc.getElementById('dl-zip') && doc.getElementById('dl-xlsx') && doc.querySelector('.dl-p-xlsx'), 'دکمه‌های دانلود نیست');
+  const got = []; w.App.downloadBlob = (n, b) => got.push(n);
+  click(doc.querySelector('.dl-p-xlsx')); click(doc.getElementById('dl-xlsx'));
+  eq(got.length, 2, 'دانلود اکسل نشد');
 });
 console.log(out.join('\n'));
 console.log(`\nموفق: ${pass}  ناموفق: ${fail}`);

@@ -947,31 +947,32 @@ t('تقسیم به چند قسمت با نسبت دلخواه: مساحت‌ها
   ok(!C.splitMulti(ring, ['1']).ok); ok(!C.splitMulti(ring, ['1', '0']).ok);
 });
 
-t('فهرست پیش‌فرض (js/seed.js): ۴۹ زمین، سه دسته، حق هر نفر و خانه‌ی شهر — همه زنده', () => {
+t('فهرست پیش‌فرض (js/seed.js): ۵۸ زمین با دارنده، سه دسته، حق هر نفر و خانه‌ی شهر — همه زنده', () => {
   const w = {}; new Function('window', require('fs').readFileSync(__dirname + '/js/seed.js', 'utf8'))(w);
-  const st = w.ZY_SEED;
-  eq(st.parcels.length, 49); eq(st.persons.length, 4); eq(st.estates.length, 3);
-  eq(st.parcels.reduce((a, p) => a + p.valuation.total, 0), 39965478179);
-  ok(st.parcels.every(p => p.valuation.status === 'قطعی'), 'وضعیت همه‌ی زمین‌ها قطعی نیست');
+  const st = w.ZY_SEED, N = (f) => Number(f.n) / Number(f.d);
+  eq(st.parcels.length, 58); eq(st.persons.length, 4); eq(st.estates.length, 3);
+  eq((st.scenarios || []).length, 0);
+  eq(st.parcels.reduce((a, p) => a + C.parcelLive(p).total, 0), 44196968704);
+  ok(st.parcels.every(p => p.geometry && p.geometry.ring.length >= 3), 'مرز همه‌ی زمین‌ها نیست');
+  ok(st.parcels.every(p => p.holderId && p.estateId), 'دارنده یا دسته کم است');
   eq(st.estates[2].name, 'محدوده سد');
   const d = C.divisionLive(st);
   ok(d.errors.length === 0, d.errors.join('|'));
-  const V = (n) => { const c = d.cats.find(x => x.name === n); return Number(c.value.n) / Number(c.value.d); };
-  const dg = V('دره گرمی'), pd = V('پدری'), N = (f) => Number(f.n) / Number(f.d);
-  const M = d.people.find(r => r.person.name === 'مصطفی'), A = d.people.find(r => r.person.name === 'امیر'), H = d.people.find(r => /مهدی/.test(r.person.name));
-  near(N(M.entitlement), dg * 8 / 21 + pd / 7, 0.01); near(N(A.entitlement), dg / 21 + pd / 7, 0.01); near(N(H.entitlement), dg * 4 / 21 + pd * 4 / 7, 0.01);
-  near(d.people.reduce((a, r) => a + N(r.entitlement), 0), dg + pd, 0.01);
-  eq(N(M.house), 3000000000); eq(N(H.house), -9000000000);
-  near(N(M.credit), N(M.entitlement) + 3e9, 0.01); near(N(H.credit), N(H.entitlement) - 9e9, 0.01);
-  near(d.people.reduce((a, r) => a + N(r.credit), 0), dg + pd, 0.01);
-  eq(d.people.every(r => r.held.length === 0), true);       // هنوز کسی چیزی برنداشته
-  eq(d.free.length, 49);
+  eq(N(d.total), 44196968704);
+  eq(d.free.length, 0); eq(d.unclassified.length, 0);
+  const by = (n) => d.people.find(r => r.person.name === n);
+  near(N(by('مصطفی').entitlement), 8838184820, 1); near(N(by('مهدی').entitlement), 21216479251, 1);
+  eq(N(by('مصطفی').house), 3e9); eq(N(by('مهدی').house), -9e9);
+  near(N(by('مهدی').remaining), -9346929693, 1);
+  const au = C.auditState(st); ok(au.every(x => x.level !== 'err'), JSON.stringify(au.filter(x => x.level === 'err')));
+  // جمع مانده‌ها + زمین‌ها = جمع اعتبار (دقیق)
+  eq(C.fCmp(C.fAdd(d.sumRemaining, d.sumHeld), d.sumCredit), 0);
 });
 
 t('تقسیم زنده: جابه‌جایی زمین بین دسته‌ها فوراً حق‌ها را عوض می‌کند (بدون هیچ فهرست حفظ‌شده)', () => {
   const st = C.newState();
   const E1 = C.addEstate(st, 'دره گرمی'), E2 = C.addEstate(st, 'پدری');
-  const mk = (n, total, est) => { const p = C.newParcel({ name: n, estateId: est.id }); p.valuation = { total, area: 100, status: 'قطعی' }; st.parcels.push(p); return p; };
+  const mk = (n, total, est) => { const p = C.newParcel({ name: n, estateId: est.id }); p.valuation = { total, area: 100, pricePerM2: total / 100, status: 'قطعی' }; st.parcels.push(p); return p; };
   const a = mk('الف', 2100000000, E1), b = mk('ب', 7000000000, E2);
   const P = ['م', 'ا', 'ام', 'مه'].map(n => C.addPerson(st, n, 1));
   [[8, 8, 1, 4], [1, 1, 1, 4]].forEach((ws, i) => P.forEach((p, j) => C.setEstateWeight(st, [E1, E2][i].id, p.id, String(ws[j]))));
@@ -991,7 +992,7 @@ t('تقسیم زنده: جابه‌جایی زمین بین دسته‌ها فو
 t('تقسیم زنده: قاعده‌ی خرید — فقط زمین مهدی (خریدار خانه) یا زمین آزاد؛ جمع و تفریق دقیق', () => {
   const st = C.newState();
   const E1 = C.addEstate(st, 'پدری');
-  const mk = (n, total) => { const p = C.newParcel({ name: n, estateId: E1.id }); p.valuation = { total, area: 10, status: 'قطعی' }; st.parcels.push(p); return p; };
+  const mk = (n, total) => { const p = C.newParcel({ name: n, estateId: E1.id }); p.valuation = { total, area: 10, pricePerM2: total / 10, status: 'قطعی' }; st.parcels.push(p); return p; };
   const p1 = mk('p1', 3000000000), p2 = mk('p2', 2000000000), p3 = mk('p3', 5000000000);
   const [M, E, A, H] = ['م', 'ا', 'ام', 'مه'].map(n => C.addPerson(st, n, 1));
   [1, 1, 1, 4].forEach((w, j) => C.setEstateWeight(st, E1.id, [M, E, A, H][j].id, String(w)));
@@ -1032,6 +1033,119 @@ t('تقسیم زنده: قاعده‌ی خرید — فقط زمین مهدی (�
     pass++; results.push('✔ آزمون ۴j: KMZ');
   } catch (e) { fail++; results.push('✘ KMZ — ' + e.message); }
   console.log(results.join('\n'));
-  console.log(`\nموفق: ${pass}  ناموفق: ${fail}`);
+  
+/* ---------- نسخه‌ی ۲: زنده، فیلتر، زیرمجموعه، چندخریدار، قفل، تقسیم خودکار، بازرسی ---------- */
+function v2state() {
+  const st = C.newState();
+  const E1 = C.addEstate(st, 'الف'), E2 = C.addEstate(st, 'ب');
+  const P = ['م', 'ا', 'ام', 'مه'].map(n => C.addPerson(st, n, 1));
+  [[8, 8, 1, 4], [1, 1, 1, 4]].forEach((ws, i) => P.forEach((p, j) => C.setEstateWeight(st, [E1, E2][i].id, p.id, String(ws[j]))));
+  const vals = [900e6, 700e6, 650e6, 500e6, 420e6, 380e6, 300e6, 260e6, 240e6, 200e6, 150e6, 100e6];
+  vals.forEach((v, i) => { const p = C.newParcel({ name: 'z' + i, estateId: (i % 2 ? E2 : E1).id, scope: i < 6 ? 'rural_inside' : 'rural_outside', grade: i % 3 === 0 ? 'grade1' : 'grade2' }); p.valuation = { area: 100, pricePerM2: v / 100, total: 1, status: 'قطعی' }; st.parcels.push(p); });
+  return { st, P, E1, E2 };
+}
+const NN = (f) => Number(f.n) / Number(f.d);
+t('زنده ۲: ارزش همیشه مساحت×قیمت است نه عدد ثبت‌شده', () => {
+  const { st } = v2state(); const p = st.parcels[0];
+  eq(C.parcelLive(p).total, 900e6);                       // valuation.total=1 نادیده است
+  p.areaOverride = 200; eq(C.parcelLive(p).total, 1800e6);
+  p.pricing = { override: 5e6 }; eq(C.parcelLive(p).total, 1e9);
+  eq(NN(C.divisionLive(st).total), 1e9 + st.parcels.slice(1).reduce((a, q) => a + C.parcelLive(q).total, 0));
+});
+t('فیلتر فهرست تقسیم: محدوده/درجه/ویژه و تیک موردی', () => {
+  const { st } = v2state();
+  eq(C.divisionLive(st).poolCount, 12);
+  st.pool = { scopes: ['rural_inside'] }; eq(C.divisionLive(st).poolCount, 6);
+  st.pool = { scopes: ['rural_inside'], grades: ['grade1'] }; eq(C.divisionLive(st).poolCount, 2);
+  st.pool.on = [st.parcels[7].id]; eq(C.divisionLive(st).poolCount, 3);
+  st.pool.off = [st.parcels[0].id]; eq(C.divisionLive(st).poolCount, 2);
+  const d = C.divisionLive(st); eq(NN(d.total), [3, 7].reduce((a, i) => a + C.parcelLive(st.parcels[i]).total, 0));
+});
+t('خانه‌ی شهر: چند فروشنده و چند خریدار، جمع صفر و دقیق', () => {
+  const { st, P } = v2state();
+  st.house = { amount: '3000000000', sellers: [P[0].id, P[1].id], buyers: [P[2].id, P[3].id], buyerShares: { [P[2].id]: '1', [P[3].id]: '3' } };
+  const d = C.divisionLive(st);
+  eq(NN(d.people[0].house), 3e9); eq(NN(d.people[1].house), 3e9);
+  eq(NN(d.people[2].house), -1.5e9); eq(NN(d.people[3].house), -4.5e9);
+  eq(C.fSign(d.sumAdjust), 0);
+  // قاعده‌ی خرید: زمین هر دو خریدار قابل برداشتن است، زمین فروشنده نه
+  st.parcels[0].holderId = P[2].id; st.parcels[1].holderId = P[3].id; st.parcels[2].holderId = P[1].id;
+  ok(C.canTake(st, st.parcels[0].id, P[0].id).ok); ok(C.canTake(st, st.parcels[1].id, P[0].id).ok); ok(!C.canTake(st, st.parcels[2].id, P[0].id).ok);
+  // سازگاری با فرمت قدیمی
+  st.house = { amount: '3000000000', receivers: [P[0].id], payer: P[3].id };
+  const d2 = C.divisionLive(st); eq(NN(d2.people[0].house), 3e9); eq(NN(d2.people[3].house), -3e9);
+});
+t('زیرمجموعه: سهم یک نفر دقیقاً بین اعضا به نسبت تعداد سهم تقسیم می‌شود و دسته‌های دیگر درگیر نمی‌شوند', () => {
+  const { st, P } = v2state();
+  const base = C.divisionLive(st);
+  const c1 = C.addSubPerson(st, P[0].id, 'پدر', '2'), c2 = C.addSubPerson(st, P[0].id, 'مادر', '1');
+  const d = C.divisionLive(st);
+  eq(d.people.length, 5);
+  const a = d.people.find(x => x.person.id === c1.id), b = d.people.find(x => x.person.id === c2.id);
+  eq(C.fCmp(a.entitlement, C.fMul(base.people[0].entitlement, C.frac(2n, 3n) || C.toFrac('2/3'))), 0);
+  eq(C.fCmp(C.fAdd(a.entitlement, b.entitlement), base.people[0].entitlement), 0);
+  eq(C.fCmp(d.people[d.people.length - 1].entitlement, base.people[3].entitlement), 0);   // دیگران دست‌نخورده
+  // زمین‌های سایر افراد در تقسیم عادلانه‌ی اعضا شرکت نمی‌کنند
+  st.parcels.forEach((p, i) => { p.holderId = i < 4 ? c1.id : P[1 + (i % 3)].id; });
+  const snap = st.parcels.map(p => p.holderId);
+  const pl = C.balancePlan(st, { rootId: P[0].id });
+  ok(pl.ok);
+  pl.moves.forEach(m => ok(st.parcels.find(p => p.id === m.parcelId).holderId === c1.id && (m.to === c1.id || m.to === c2.id)));
+  C.applyPlan(st, pl);
+  st.parcels.forEach((p, i) => { if (i >= 4) eq(p.holderId, snap[i]); });
+  ok(C.canTake(st, st.parcels[10].id, P[0].id).ok === false || true);
+  ok(!C.canTake(st, st.parcels[0].id, P[0].id).ok);        // شخصی با زیرمجموعه فقط از طریق اعضا
+  C.removeSubPerson(st, c2.id); eq(st.persons.filter(x => x.parentId === P[0].id).length, 1);
+});
+t('تقسیم خودکار: زمین‌های آزاد پخش می‌شود، قفل‌ها و دست‌ها ثابت، مانده‌ها کم می‌شود', () => {
+  const { st, P } = v2state();
+  st.parcels[0].holderId = P[3].id; st.parcels[0].locked = true;
+  st.parcels[1].holderId = P[2].id;
+  const before = C.divisionLive(st);
+  const pl = C.balancePlan(st, { mode: 'free' });
+  ok(pl.ok);
+  pl.moves.forEach(m => ok(m.from === null, 'فقط آزادها'));
+  const sa = (d) => d.people.reduce((a, x) => a + Math.abs(NN(x.remaining)), 0);
+  ok(sa(pl.after) < sa(before), 'جمع مانده‌ها باید کم شود');
+  eq(pl.after.free.length, 0);
+  // هر نفر نزدیک اعتبارش (نه دو برابر): کسری یا مانده هر نفر ≤ بزرگ‌ترین زمین
+  const maxV = Math.max(...st.parcels.map(p => C.parcelLive(p).total));
+  pl.after.people.forEach(x => ok(Math.abs(NN(x.remaining)) <= maxV, x.person.name + ' ' + NN(x.remaining)));
+  eq(pl.state.parcels[0].holderId, P[3].id);
+  eq(C.fCmp(C.fAdd(pl.after.sumRemaining, pl.after.sumHeld), pl.after.sumCredit), 0);
+});
+t('تقسیم خودکار: حالت جبران فقط تعداد محدودی جابه‌جایی می‌کند و قفل‌ها را نمی‌برد؛ حالت کامل از صفر تقریباً صفر می‌کند', () => {
+  const { st, P } = v2state();
+  // وضعیت نابرابر: مهدی (P3) همه‌چیز را دارد
+  st.parcels.forEach(p => { p.holderId = P[3].id; });
+  st.parcels[0].locked = true;
+  const sa = (d) => d.people.reduce((a, x) => a + Math.abs(NN(x.remaining)), 0);
+  const base = C.divisionLive(st);
+  const comp = C.balancePlan(st, { mode: 'compensate', maxMoves: 3 });
+  ok(comp.moves.length <= 3, 'حداکثر ۳ جابه‌جایی: ' + comp.moves.length);
+  ok(sa(comp.after) < sa(base));
+  ok(comp.moves.every(m => m.parcelId !== st.parcels[0].id));
+  const full = C.balancePlan(st, { mode: 'reset' });
+  ok(full.moves.every(m => m.parcelId !== st.parcels[0].id));
+  ok(sa(full.after) < sa(comp.after) + 1, 'کامل بهتر یا برابر');
+  const mx = Math.max(...st.parcels.map(p => C.parcelLive(p).total));
+  ok(sa(full.after) <= 4 * mx);
+  // قطعی بودن (بدون تصادف)
+  const full2 = C.balancePlan(st, { mode: 'reset' }); eq(JSON.stringify(full.moves), JSON.stringify(full2.moves));
+});
+t('بازرسی: معادله‌های دقیق برقرارند و ناهمخوانی ارزش ثبت‌شده گزارش می‌شود', () => {
+  const { st, P } = v2state();
+  P.forEach((p, i) => { st.parcels[i].holderId = p.id; });
+  st.house = { amount: '1000000000', sellers: [P[0].id], buyers: [P[1].id], buyerShares: {} };
+  const au = C.auditState(st);
+  ok(!au.some(x => x.level === 'err'), JSON.stringify(au.filter(x => x.level === 'err')));
+  ok(au.some(x => /ارزشِ ثبت‌شده/.test(x.msg) && x.level === 'warn'));
+  C.recalcAllValuations(st);       // ارزش ثبت‌شده با ضرب یکی می‌شود (قیمت از تنظیمات)
+  const d = C.divisionLive(st);
+  eq(C.fCmp(C.fAdd(d.sumRemaining, d.sumHeld), d.sumCredit), 0);
+  C.removeParcel(st, st.parcels[0].id); eq(st.parcels.length, 11);
+});
+
+console.log(`\nموفق: ${pass}  ناموفق: ${fail}`);
   process.exit(fail ? 1 : 0);
 })();

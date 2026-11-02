@@ -12,7 +12,7 @@
   App.on('init', function () {
     const map = M.map = L.map('map', { zoomControl: true, worldCopyJump: false, doubleClickZoom: false }).setView([32.5, 54], 6);
     M.SAT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-    const sat = L.tileLayer(M.SAT_URL, { maxZoom: 19, attribution: 'تصاویر ماهواره‌ای © Esri, Maxar, Earthstar Geographics' });
+    const sat = L.tileLayer(M.SAT_URL, { maxZoom: 19, crossOrigin: 'anonymous', attribution: 'تصاویر ماهواره‌ای © Esri, Maxar, Earthstar Geographics' });
     const street = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' });
     const blank = L.layerGroup();
     [sat, street].forEach(t => {
