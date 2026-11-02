@@ -159,6 +159,9 @@ t('صفحه‌ی تقسیم: دسته‌ها با ارزش و ضریب، حسا�
   ok(!/سناریو|اشخاص و تقسیم/.test(doc.getElementById('people-root').textContent), 'اثری از سناریو مانده است');
   const root = doc.getElementById('people-root').textContent;
   ok(doc.getElementById('cat-table'), 'جدول دسته‌ها نیست');
+  ok(doc.getElementById('auto-box') && doc.getElementById('auto-run'), 'موتور تخصیص خودکار در رابط نیست');
+  const facets = Array.from(doc.querySelectorAll('#division-selection .facet input[type=checkbox]'));
+  ok(facets.length > 0 && facets.every(x => x.checked), 'همه‌ی فیلترهای محدوده/درجه/دسته باید پیش‌فرض فعال باشند');
   has(root, 'دره گرمی'); has(root, 'پدری'); has(root, '۲٬۱۰۰٬۰۰۰٬۰۰۰'); has(root, '۸٬۰۰۰٬۰۰۰٬۰۰۰', 'ارزش دسته‌ی پدری');
   const card = doc.querySelector('#sum-table .pcard[data-pid="' + x.M.id + '"]');
   ok(card, 'کارت مصطفی نیست');
@@ -213,6 +216,16 @@ t('صفحه‌ی تقسیم: برداشتن زمین فقط از مهدی/آزا
   eq(w.App.S.parcels.find(p => p.id === x.c2).holderId, x.E.id);
   // لیست نهایی زمین‌های هر نفر
   has(doc.getElementById('res-box').textContent, 'پدری ب'); has(doc.getElementById('res-box').textContent, 'پدری ج');
+});
+
+t('صفحه‌ی تقسیم: اصلاح متراژ در فهرست نهایی روی زمین اصلی و جمع زنده اعمال می‌شود', () => {
+  const x = setup();
+  const p = w.App.S.parcels.find(q => q.id === x.b);
+  p.areaComputed = 3000; p.attrs = { residential: 'residential', agri: 'none', farmType: 'irrigated', urbanUse: 'residential' }; C.applyValuation(p, w.App.S.settings, 'آزمون متراژ نهایی'); w.App.save(); w.App.emit('state'); w.App.tab('people');
+  const row = Array.from(doc.querySelectorAll('#res-box tr')).find(tr => tr.querySelector('.l') && tr.querySelector('.l').textContent === p.name);
+  const inp = row && row.querySelector('.final-area'); ok(inp, 'ورودی متراژ فهرست نهایی نیست');
+  const old = C.parcelLive(p).total; change(inp, '3001');
+  const now = C.parcelLive(p).total; eq(p.areaOverride, 3001); ok(now !== old, 'تغییر متراژ در جمع اعمال نشد');
 });
 
 t('صفحه‌ی تقسیم: «سایر (+/−)» و دسته‌ی تازه با سهم‌بندی مثل پدری', () => {
@@ -277,13 +290,15 @@ t('تقسیم به چند قسمت: نسبت ۱:۱:۱ ⇒ سه قسمت براب
 t('صفحه‌ی تقسیم ۲: ویرایش مساحت و قیمت در لیست ⇒ ارزش و همه‌ی عددها زنده عوض می‌شود', () => {
   const x = setup();
   const row = doc.querySelector('#pick-list .prow[data-pid="' + x.a + '"]');
-  change(row.querySelector('.in-area'), '2000');
   const p = w.App.S.parcels.find(q => q.id === x.a);
+  change(row.querySelector('.in-price'), '2100000');
+  eq(C.parcelLive(p, w.App.S.settings).total, 1000 * 2100000);
+  change(doc.querySelector('#pick-list .prow[data-pid="' + x.a + '"] .in-area'), '2000');
   eq(p.areaOverride, 2000);
-  eq(C.parcelLive(p).total, 2000 * 2100000);
-  has(row.querySelector('.pv').textContent, '۴٬۲۰۰٬۰۰۰٬۰۰۰');
-  change(row.querySelector('.in-price'), '1000000');
-  eq(C.parcelLive(p).total, 2000000000);
+  eq(C.parcelLive(p, w.App.S.settings).total, 2000 * 2100000);
+  has(doc.querySelector('#pick-list .prow[data-pid="' + x.a + '"] .pv').textContent, '۴٬۲۰۰٬۰۰۰٬۰۰۰');
+  change(doc.querySelector('#pick-list .prow[data-pid="' + x.a + '"] .in-price'), '1000000');
+  eq(C.parcelLive(p, w.App.S.settings).total, 2000000000);
   has(doc.getElementById('cat-table').textContent, '۲٬۰۰۰٬۰۰۰٬۰۰۰');
 });
 t('صفحه‌ی تقسیم ۲: حذف زمین از لیست و فیلتر «در تقسیم»', () => {

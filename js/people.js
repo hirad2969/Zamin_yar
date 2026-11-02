@@ -16,7 +16,7 @@
   const money = (f) => App.n(R(f), 0);
   const signed = (f) => { const v = R(f); return (v > 0 ? '+' : v < 0 ? '−' : '') + App.n(Math.abs(v), 0); };
   const pName = (id) => { const p = S().persons.find(x => x.id === id); return p ? p.name : '—'; };
-  const L = (p) => C.parcelLive(p);
+  const L = (p) => C.parcelLive(p, S().settings);
   const SC = C.SCOPES, GR = C.GRADES;
   function ev() { try { return C.divisionLive(S()); } catch (e) { console.error(e); return null; } }
   function save() { App.save(); }
@@ -53,7 +53,7 @@
       const pl = st.pool = st.pool || {};
       const grp = (title, key, opts) => {
         const cur = Array.isArray(pl[key]) ? pl[key] : null;
-        return el('div', { class: 'row', style: 'gap:10px;align-items:center' }, [el('b', { text: title })].concat(opts.map(o =>
+        return el('div', { class: 'row facet', style: 'gap:10px;align-items:center' }, [el('b', { text: title })].concat(opts.map(o =>
           chk(o[1], !cur || cur.indexOf(o[0]) >= 0, (on) => {
             let a = Array.isArray(pl[key]) ? pl[key].slice() : opts.map(x => x[0]);
             a = a.filter(x => x !== o[0]); if (on) a.push(o[0]);
@@ -62,9 +62,7 @@
           }, 'pf-' + key))));
       };
       bPool.appendChild(el('div', { class: 'note', text: 'پیش‌فرض همه‌ی زمین‌ها انتخاب است. با برداشتن تیک، آن گروه از تقسیم و همه‌ی حساب‌ها بیرون می‌رود؛ در لیست پایین هم برای هر زمین می‌توانید جدا تیک بزنید یا بردارید.' }));
-      bPool.appendChild(grp('محدوده:', 'scopes', Object.keys(SC).map(k => [k, SC[k]])));
-      bPool.appendChild(grp('درجه:', 'grades', Object.keys(GR).map(k => [k, GR[k]])));
-      bPool.appendChild(grp('نوع:', 'specials', [['normal', 'عادی'], ['special', 'ویژه']]));
+      bPool.appendChild(el('div', { id: 'division-selection' }, [grp('محدوده:', 'scopes', Object.keys(SC).map(k => [k, SC[k]])), grp('درجه:', 'grades', Object.keys(GR).map(k => [k, GR[k]])), grp('نوع:', 'specials', [['normal', 'عادی'], ['special', 'ویژه']])]));
       const inP = st.parcels.filter(p => C.inPool(st, p));
       let V = C.frac(0); inP.forEach(p => { V = C.fAdd(V, C.frac(L(p).total)); });
       bPool.appendChild(el('div', { class: 'row', style: 'margin-top:6px' }, [
@@ -315,7 +313,7 @@
         const w = el('div', { class: 'card', 'data-pid': x.person.id, style: 'break-inside:avoid' });
         w.appendChild(el('h4', { style: 'margin:0 0 6px', text: personTitle(x, st) + ' — ' + App.n(x.held.length, 0) + ' قطعه، ' + App.n(x.heldArea, 0) + ' م²، ارزش ' + money(x.heldValue) + ' تومان (' + App.n(pct, 2) + '٪ از کل)' }));
         if (x.held.length) w.appendChild(el('table', { class: 't' }, [el('thead', null, el('tr', null, ['#', 'زمین', 'دسته', 'مساحت', 'قیمت هر متر', 'ارزش'].map(h => el('th', { text: h })))),
-          el('tbody', null, x.held.map((p, i) => { const lv = L(p); return el('tr', null, [el('td', { text: App.n(i + 1, 0) }), el('td', { class: 'l', text: p.name }), el('td', { text: catNameOf(st, p) }), el('td', { text: App.n(lv.area, 0) }), el('td', { text: App.n(lv.price, 0) }), el('td', { text: App.n(lv.total, 0) })]); }))]));
+          el('tbody', null, x.held.map((p, i) => { const lv = L(p); return el('tr', null, [el('td', { text: App.n(i + 1, 0) }), el('td', { class: 'l', text: p.name }), el('td', { text: catNameOf(st, p) }), el('td', null, el('input', { type: 'text', inputmode: 'decimal', dir: 'ltr', class: 'final-area', value: String(Math.round(lv.area * 100) / 100), style: 'width:84px', onchange: (e) => { const v = App.num(e.target.value); if (v == null || !(v > 0)) { App.toast('متراژ باید عددی بزرگ‌تر از صفر باشد', 'warn'); e.target.value = String(lv.area); return; } p.areaOverride = v; const n2 = L(p); p.valuation = Object.assign({}, p.valuation || {}, { area: n2.area, pricePerM2: n2.price, total: n2.total }); p.updatedAt = C.nowIso(); refresh(); } })), el('td', { text: App.n(lv.price, 0) }), el('td', { text: App.n(lv.total, 0) })]); }))]));
         else w.appendChild(el('div', { class: 'note', text: 'زمینی دستش نیست.' }));
         const v = R(x.remaining);
         w.appendChild(el('div', { class: v < 0 ? 'neg' : 'pos', text: 'اعتبار ' + money(x.credit) + ' − زمین‌ها ' + money(x.heldValue) + ' = ' + (v < 0 ? 'کسری ' : 'مانده ') + money(C.fAbs(x.remaining)) + ' تومان' }));

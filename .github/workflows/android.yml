@@ -4,8 +4,9 @@ name: Build Android APK
 # پس فقط پلتفرم/ابزار ساخت موردنیاز (API 36) آماده می‌شود.
 on:
   workflow_dispatch: {}
-  push: { branches: [main] }
-  pull_request: { branches: [main] }
+  push:
+    branches: ['**']
+  pull_request: {}
 
 jobs:
   apk:
@@ -26,17 +27,25 @@ jobs:
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" > /dev/null 2>&1 || true
       - name: Install dependencies
         run: npm ci
+      - name: Run calculation and DOM tests before packaging
+        run: npm run test:all
       - name: Copy web app into the Android project
         run: npm run android:sync
       - name: Build debug APK
         run: cd android && chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+      - name: Create checksum
+        run: sha256sum android/app/build/outputs/apk/debug/app-debug.apk > android/app/build/outputs/apk/debug/app-debug.apk.sha256
       - uses: actions/upload-artifact@v4
-        with: { name: zamin-yar-apk, path: android/app/build/outputs/apk/debug/app-debug.apk }
+        with:
+          name: zamin-yar-apk-${{ github.run_number }}
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/debug/app-debug.apk.sha256
 
       # لینک همیشگی دانلود اندروید (بدون نیاز به ورود به GitHub):
       # https://github.com/hirad2969/Zamin_yar/releases/latest/download/zamin-yar.apk
       - name: انتشار APK در «آخرین نسخه‌ی اندروید»
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: android-latest

@@ -169,9 +169,10 @@ const center = [lat0 + dLat / 2, lon0 + dLon / 2];
     await page.evaluate((c) => App.map.map.setView(c, 17, { animate: false }), center);
     await page.click('text=تشخیص خودکار مرز'); await wait(300);
     const b = await mapBox(); await page.mouse.click(b.x + b.w / 2, b.y + b.h / 2);
-    await page.waitForSelector('.toast.err', { timeout: 15000 });
-    const t = await page.textContent('.toast.err'); ok(/اینترنت|کاشی/.test(t), t);
-    ok((await page.textContent('#detect-bar')).includes('مرکز زمین'), 'بعد از خطا باید دوباره منتظر لمس باشد');
+    await page.waitForSelector('.toast.err, .toast.warn', { timeout: 20000 });
+    const t = await page.textContent('.toast.err, .toast.warn'); ok(/اینترنت|کاشی/.test(t), t);
+    if (/کادر تقریبی/.test(t)) ok(await page.evaluate(() => App.map.getBoundary().valid), 'کادر تقریبی ساخته نشد');
+    else ok((await page.textContent('#detect-bar')).includes('مرکز زمین'), 'بعد از خطا باید دوباره منتظر لمس باشد');
     await page.keyboard.press('Escape'); tilesMode = 'ok';
   });
 

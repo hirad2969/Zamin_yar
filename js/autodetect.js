@@ -64,16 +64,21 @@
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && AD.active) AD.cancel(); });
   });
 
-  /** بارگذاری یک کاشی؛ تا ۳ بار تلاش می‌کند (بار دوم و سوم با پارامتر ضدکش تا اگر پاسخ ناقص/بدون CORS در کش مانده بود دوباره گرفته شود) */
-  function loadTile(z, x, y) {
-    const base = M.SAT_URL.replace('{z}', z).replace('{y}', y).replace('{x}', x);
-    const once = (n) => new Promise((res) => {
+  function loadOneTile(url, z, x, y) {
+    return new Promise((res) => {
       const im = new Image(); im.crossOrigin = 'anonymous';
-      const to = setTimeout(() => { im.onload = im.onerror = null; res(null); }, 12000);
-      im.onload = () => { clearTimeout(to); res(im); }; im.onerror = () => { clearTimeout(to); res(null); };
-      im.src = n ? base + (base.indexOf('?') < 0 ? '?' : '&') + 'zy=' + Date.now() + n : base;
+      let done = false; const finish = (v) => { if (done) return; done = true; res(v); };
+      const timer = setTimeout(() => finish(null), 9000);
+      im.onload = () => { clearTimeout(timer); finish(im); };
+      im.onerror = () => { clearTimeout(timer); finish(null); };
+      im.src = url.replace('{z}', z).replace('{y}', y).replace('{x}', x);
     });
-    return (async () => { for (let n = 0; n < 3; n++) { const im = await once(n); if (im) return im; await new Promise(r => setTimeout(r, 250 * (n + 1))); } return null; })();
+  }
+  function loadTile(z, x, y) {
+    const urls = M.SAT_URLS && M.SAT_URLS.length ? M.SAT_URLS : [M.SAT_URL];
+    // هر نشانی تا دو بار (بار دوم با پارامتر ضدکش تا پاسخ ناقص/بدون CORS کش‌شده کنار برود)، سپس نشانی دوم
+    const tryUrl = async (u) => { for (let n = 0; n < 2; n++) { const im = await loadOneTile(n ? u + (u.indexOf('?') < 0 ? '?' : '&') + 'zy=' + Date.now() : u, z, x, y); if (im) return im; await new Promise(r => setTimeout(r, 250)); } return null; };
+    return tryUrl(urls[0]).then(im => im || (urls[1] ? tryUrl(urls[1]) : null));
   }
   const tick = () => new Promise(r => setTimeout(r, 30));
 
@@ -94,11 +99,19 @@
     return { img, x0, y0 };
   }
 
+  function fallbackRingByArea(latlng, area) {
+    // وقتی سرویس تصویر در دسترس نیست، با متراژ معلوم یک کادر تقریبی می‌سازیم؛
+    // این جای تشخیص تصویری نیست اما کاربر را متوقف نمی‌کند و مرز بعداً قابل ویرایش است.
+    const side = Math.sqrt(area), lat = latlng.lat, c = Math.max(0.15, Math.cos(lat * Math.PI / 180));
+    const dLat = side / 111320, dLon = side / (111320 * c), lo = latlng.lng - dLon / 2, la = lat - dLat / 2;
+    return [[lo, la], [lo + dLon, la], [lo + dLon, la + dLat], [lo, la + dLat]];
+  }
+
   async function run(latlng) {
     busy = true;
     say([el('b', { text: '⏳ در حال تحلیل تصویر ماهواره‌ای…' })]);
     await tick();
-    let last = null, tileFail = null;
+    let last = null;
     try {
       const est = hintM2();
       const mpp = (z) => 156543.03392804097 * Math.cos(latlng.lat * Math.PI / 180) / Math.pow(2, z);
@@ -109,9 +122,8 @@
         const z = ZOOMS[zi];
         let g;
         try { g = await grab(latlng, z); }
-        catch (e) {
-          // کاشی این زوم در دسترس نیست (مثلاً تصویر آن‌قدر نزدیک ندارد) ⇒ زوم دورتر
-          if (/tiles/.test(e.message) && zi < ZOOMS.length - 1) { tileFail = e; say([el('b', { text: '⏳ تصویر این بزرگنمایی موجود نیست؛ با بزرگنمایی کمتر تلاش می‌شود…' })]); await tick(); continue; }
+        catch (e) {      // کاشی این بزرگنمایی در دسترس نیست ⇒ بزرگنمایی کمتر
+          if (/tiles/.test(e.message) && zi < ZOOMS.length - 1) { say([el('b', { text: '⏳ تصویر این بزرگنمایی موجود نیست؛ با بزرگنمایی کمتر تلاش می‌شود…' })]); await tick(); continue; }
           throw e;
         }
         await tick();
@@ -125,11 +137,20 @@
       }
     } catch (e) {
       busy = false;
-      const msg = /cors/.test(e.message) ? 'سرویس نقشه اجازه‌ی خواندن تصویر برای تحلیل را نداد.' : /tiles/.test(e.message) ? 'کاشی‌های ماهواره‌ای بارگذاری نشد (' + e.message.replace('tiles:', '') + ' کاشی). اینترنت را بررسی کنید و دوباره لمس کنید؛ تشخیص خودکار نیازمند اینترنت است.' : 'خطا در تحلیل: ' + e.message;
+      const est = hintM2();
+      if ((/cors|tiles/.test(e.message)) && est) {
+        const ring = fallbackRingByArea(latlng, est);
+        M.setBoundary(ring, { source: 'auto', meta: { method: 'ساخت کادر بر اساس متراژ تخمینی؛ کاشی ماهواره‌ای در دسترس نبود', estimateM2: est, note: 'تقریبی و نیازمند اصلاح دستی' }, fit: false });
+        AD.active = false; if (M.map) M.map.getContainer().style.cursor = '';
+        hideBar(); M.map.fitBounds(L.latLngBounds(ring.map(ll)), { maxZoom: 19, padding: [60, 60] });
+        App.toast('کاشی ماهواره‌ای خوانده نشد؛ کادر تقریبی بر اساس متراژ ساخته شد. گوشه‌ها را با مرز واقعی اصلاح و ذخیره کنید.', 'warn');
+        return;
+      }
+      const msg = /cors/.test(e.message) ? 'سرویس نقشه اجازه‌ی خواندن تصویر برای تحلیل را نداد.' : /tiles/.test(e.message) ? 'کاشی‌های ماهواره‌ای بارگذاری نشد. متراژ تخمینی را وارد کنید تا کادر تقریبی ساخته شود، یا مرز را دستی/GPS رسم کنید.' : 'خطا در تحلیل: ' + e.message;
       App.toast(msg, 'err'); waiting(splitHint()); return;
     }
     busy = false;
-    if (!last) { App.toast('کاشی‌های ماهواره‌ای در این محل بارگذاری نشد (اینترنت قطع است یا سرویس نقشه تصویر این منطقه را ندارد). اینترنت را بررسی کنید یا مرز را دستی بکشید.', 'err'); waiting(splitHint()); return; }
+    if (!last) { App.toast('کاشی‌های ماهواره‌ای در این محل بارگذاری نشد (اینترنت قطع است یا تصویر این منطقه موجود نیست). اینترنت را بررسی کنید یا مرز را دستی بکشید.', 'err'); waiting(splitHint()); return; }
     const r = last.r;
     if (!r.ok) {
       App.toast(r.reason === 'small' ? 'ناحیه‌ی همرنگ اطراف این نقطه خیلی کوچک است. نقطه‌ی دیگری از داخل زمین را لمس کنید یا مرز را دستی بکشید.' : 'مرز مشخصی تشخیص داده نشد. اگر مرز روی عکس نشانه‌ای ندارد، مرز کل زمین را بکشید و با «تقسیم به دو قسمت با متراژ مشخص» قسمت موردنظر را جدا کنید.', 'warn');

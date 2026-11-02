@@ -1,5 +1,9 @@
 apply plugin: 'com.android.application'
 
+def requestedVersionCode = (System.getenv('APP_VERSION_CODE') ?: System.getenv('GITHUB_RUN_NUMBER') ?: '1').toLong()
+def buildVersionCode = (requestedVersionCode % 2000000000L)
+if (buildVersionCode < 1L) buildVersionCode = 1L
+
 android {
     namespace = "ir.zaminyar.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +11,8 @@ android {
         applicationId "ir.zaminyar.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode buildVersionCode.toInteger()
+        versionName System.getenv('APP_VERSION_NAME') ?: '1.1.0'  // نسخه‌ی تجاری بعد از ارتقای موتور تقسیم
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

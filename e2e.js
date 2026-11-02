@@ -179,20 +179,14 @@ const near = (a, b, t, m) => { if (!isFinite(a) || Math.abs(a - b) > t) throw ne
     await p2.click('.modal .btn:has-text("ثبت")');
     const r = await p2.evaluate(() => ({ v: App.S.settings.version, prices: App.S.parcels.map(p => [p.name, p.valuation.pricePerM2, p.valuation.settingsVersion]) }));
     ok(r.v === 2, 'نسخه‌ی تنظیمات 2 نشد: ' + JSON.stringify(r));
-    const a = r.prices.find(x => x[0] === 'زمین آزمون ۱'); ok(a[1] === 150000 && a[2] === 1, 'قیمت قدیمی بدون اجازه تغییر کرد: ' + JSON.stringify(a));
+    const a = r.prices.find(x => x[0] === 'زمین آزمون ۱'); ok(a[1] === 150000 && a[2] === 1, 'عکس ثبت‌شده‌ی قدیمی فقط برای سازگاری می‌ماند: ' + JSON.stringify(a));
+    ok(await p2.evaluate(() => App.C.parcelLive(App.S.parcels.find(x => x.name === 'زمین آزمون ۱'), App.S.settings).price) === 200000, 'قیمت زنده باید فوراً از تنظیمات جدید بیاید');
     // زمین جدید با قیمت جدید
     const nv = await p2.evaluate(() => { const C = App.C; const p = C.newParcel({ scope: 'rural_outside', grade: 'grade1', special: true, areaComputed: 100, attrs: { farmType: 'irrigated' } }); return C.valuate(p, App.S.settings).price; });
     ok(nv === 200000, 'قیمت جدید اعمال نشد: ' + nv);
-    // در فرم، زمین قدیمی هشدار می‌دهد ولی قیمتش را عوض نمی‌کند
-    await p2.click('#tabs >> text=زمین‌ها');
-    ok((await p2.textContent('#parcels-root')).includes('قدیمی'));
+    // محاسبه زنده است: فرم و فهرست فوراً قیمت جدید را نشان می‌دهند
     await p2.evaluate(() => { App.tab('map'); App.form.open(App.S.parcels.find(x => x.name === 'زمین آزمون ۱').id); });
-    const s = await p2.textContent('#f-sum'); ok(s.includes('۱۵۰٬۰۰۰') && s.includes('محاسبه‌ی مجدد'), s.slice(0, 300));
-    // با اجازه‌ی صریح، محاسبه‌ی مجدد
-    await p2.click('#f-recalc');
-    ok((await p2.textContent('#f-sum')).includes('۲۰۰٬۰۰۰'));
-    await p2.click('text=ذخیره‌ی تغییرات');
-    ok(await p2.evaluate(() => App.S.parcels.find(x => x.name === 'زمین آزمون ۱').valuation.pricePerM2) === 200000);
+    ok((await p2.textContent('#f-sum')).includes('۲۰۰٬۰۰۰'), 'خلاصه‌ی فرم زنده نیست');
   });
 
   /* ---- تقسیم ---- */
