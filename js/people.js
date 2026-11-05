@@ -31,10 +31,10 @@
     r.appendChild(el('div', { class: 'note', text: 'هر عدد اینجا خودکار و دقیق حساب می‌شود: ارزش هر زمین = مساحت × قیمت هر متر؛ حق هر نفر = ارزش دسته × سهم او؛ مانده = حق + خانه‌ی شهر + سایر − ارزش زمین‌هایی که دستش است. مساحت و قیمت را همین‌جا در لیست زمین‌ها هم می‌توانید اصلاح کنید.' }));
     const strip = el('div', { id: 'strip-box', class: 'strip' });
     const mk = (id) => el('div', { class: 'card', id });
-    const bPool = mk('pool-box'), bCat = mk('cat-box'), bHouse = mk('house-box'), bPeople = mk('sum-box'), bAuto = mk('auto-box'), bPick = mk('pick-box'),
+    const bPool = mk('pool-box'), bRule = mk('rule-box'), bCat = mk('cat-box'), bHouse = mk('house-box'), bPeople = mk('sum-box'), bAuto = mk('auto-box'), bPick = mk('pick-box'),
       bRes = mk('res-box'), bAud = mk('audit-box'), bCode = mk('code-box'), bPer = mk('persons-box');
     let data = null; const rows = {};
-    const refresh = () => { save(); data = ev(); drawStrip(); drawPool(); drawCat(); drawPeople(); drawHouse(); drawAuto(); drawRes(); drawAudit(); markRows(); };
+    const refresh = () => { save(); data = ev(); drawStrip(); drawPool(); drawRule(); drawCat(); drawPeople(); drawHouse(); drawAuto(); drawRes(); drawAudit(); markRows(); };
     const full = () => { save(); ui.plan = null; render(); };
 
     function drawStrip() {
@@ -70,10 +70,91 @@
         el('button', { class: 'btn sm sec2', id: 'pool-all', text: 'انتخاب همه', onclick: () => { st.pool = {}; full(); } })]));
     }
 
-    /* ۱) دسته‌ها */
+    /* ۱) مبنای تقسیم: مستقل یا مرتبط با ارث (قابل بازبینی و قابل تغییر) */
+    function drawRule() {
+      bRule.innerHTML = '';
+      const pol = C.normalizeAllocationPolicy(st, st.allocationPolicy || {});
+      const ir = st.inheritanceRule = st.inheritanceRule || (C.defaultInheritanceRule ? C.defaultInheritanceRule() : { relations: {}, ratios: {} });
+      ir.relations = ir.relations || {}; ir.ratios = ir.ratios || {};
+      const roots = C.personTree(st).roots, finalized = !!(st.allocationRun && st.allocationRun.finalized);
+      bRule.appendChild(el('h3', { style: 'margin-top:0', text: '۱) مبنای تقسیم و وزن سهم‌ها' }));
+      bRule.appendChild(el('div', { class: 'note', text: 'تقسیم از اینجا به بعد الزاماً ارثی نیست. «مستقل» یعنی رابطه‌ی حقوقی فرض نمی‌شود و شما وزن هر شخص را تعیین می‌کنید. «مرتبط با ارث» فقط نسبت پیشنهادی است؛ قبل از اعمال می‌توانید رابطه و هر وزن را عوض کنید. اعداد به‌صورت کسر دقیق ذخیره و محاسبه می‌شوند.' }));
+      const relation = el('select', { id: 'division-relation-mode', disabled: finalized ? true : null }, [
+        el('option', { value: 'independent', text: 'تقسیم مستقل / قانون سفارشی (بدون فرض ارث)' }),
+        el('option', { value: 'inheritance', text: 'مرتبط با قانون ارث — فقط مبنای پیشنهادی و قابل بازبینی' }),
+      ]);
+      relation.value = pol.relationMode === 'inheritance' ? 'inheritance' : 'independent';
+      relation.onchange = () => {
+        const inh = relation.value === 'inheritance';
+        C.setAllocationPolicy(st, { mode: inh ? 'law_ratio' : 'custom', relationMode: inh ? 'inheritance' : 'independent', inheritanceEnabled: inh, appliedToEstates: false });
+        ir.enabled = inh; ir.legalReviewed = false; full();
+      };
+      bRule.appendChild(el('div', { class: 'row', style: 'align-items:center;gap:8px' }, [el('b', { text: 'نوع رابطه:' }), relation,
+        el('span', { class: 'tag ' + (pol.appliedToEstates ? 'final' : 'prov'), text: pol.appliedToEstates ? 'اعمال‌شده در دسته‌ها' : 'پیشنویس/قابل تغییر' })]));
+      if (relation.value === 'inheritance') {
+        const checked = el('input', { type: 'checkbox', id: 'inheritance-reviewed', checked: ir.legalReviewed ? true : null, disabled: finalized ? true : null, onchange: (e) => { ir.legalReviewed = e.target.checked; ir.reviewedAt = e.target.checked ? C.nowIso() : ''; save(); drawRule(); } });
+        bRule.appendChild(el('div', { class: 'box warn' }, [checked, ' نسبت‌های زیر حکم قطعی حقوقی نیستند؛ بازبینی من انجام شد و با پرونده‌ی حاضر سازگار است.']));
+      }
+      const head = relation.value === 'inheritance' ? ['شخص', 'رابطه', 'وزن پیشنهادی/قابل تغییر', 'سهم نهایی از مجموع'] : ['شخص', 'وزن دلخواه', 'سهم نهایی از مجموع'];
+      const tb = el('tbody');
+      const suggestion = relation.value === 'inheritance' ? C.suggestInheritanceRatios(st) : {};
+      roots.forEach(p => {
+        let raw = Object.prototype.hasOwnProperty.call(pol.personWeights || {}, p.id) ? pol.personWeights[p.id] : null;
+        if (raw == null && relation.value === 'inheritance' && Object.prototype.hasOwnProperty.call(ir.ratios, p.id)) raw = ir.ratios[p.id];
+        if (raw == null && suggestion[p.id] != null) raw = suggestion[p.id];
+        if (raw == null) raw = C.fText(C.personWeightFrac(p));
+        const currentF = C.toFrac(raw);
+        const value = currentF ? C.fText(currentF) : '';
+        const weight = el('input', { type: 'text', dir: 'ltr', class: 'division-weight', 'data-pid': p.id, value, placeholder: 'مثلاً ۱، ۲ یا ۳/۲', style: 'width:92px', disabled: finalized ? true : null, onchange: (e) => {
+          const text = String(e.target.value || '').trim();
+          if (!text) { pol.personWeights[p.id] = C.fPack(C.frac(0)); if (relation.value === 'inheritance') delete ir.ratios[p.id]; C.setAllocationPolicy(st, pol); full(); return; }
+          const f = C.toFrac(text);
+          if (!f || C.fSign(f) < 0) { App.toast('وزن باید عدد، کسر مثبت یا صفر باشد (مثلاً ۲ یا ۳/۲)', 'warn'); e.target.value = value; return; }
+          pol.personWeights[p.id] = C.fPack(f); pol.updatedAt = C.nowIso();
+          if (relation.value === 'inheritance') ir.ratios[p.id] = C.fPack(f);
+          C.setAllocationPolicy(st, pol); st.allocationPolicy.appliedToEstates = false; full();
+        } });
+        if (relation.value === 'inheritance') {
+          const rs = el('select', { class: 'division-relation', 'data-pid': p.id, disabled: finalized ? true : null }, [
+            ['spouse', 'همسر'], ['son', 'پسر'], ['daughter', 'دختر'], ['parent', 'والد'], ['sibling', 'خواهر/برادر'], ['other', 'سایر رابطه‌ها']
+          ].map(a => el('option', { value: a[0], text: a[1] })));
+          rs.value = ir.relations[p.id] || 'other';
+          rs.onchange = () => { ir.relations[p.id] = rs.value; ir.enabled = true; ir.legalReviewed = false; save(); drawRule(); };
+          tb.appendChild(el('tr', null, [el('td', { text: p.name }), el('td', null, rs), el('td', null, weight)]));
+        } else tb.appendChild(el('tr', null, [el('td', { text: p.name }), el('td', null, weight)]));
+      });
+      if (roots.length) bRule.appendChild(el('div', { class: 'scroll' }, el('table', { class: 't', id: 'division-rule-table' }, [el('thead', null, el('tr', null, head.map(h => el('th', { text: h })))), tb])));
+      else bRule.appendChild(el('div', { class: 'box warn', text: 'برای ساخت تقسیم حداقل یک شخص اضافه کنید.' }));
+      const preview = C.allocationPolicyPreview(st, { policy: pol });
+      const sumText = preview && preview.total ? money(preview.total) : '۰';
+      const sumWeights = preview && preview.weightSum ? C.fText(preview.weightSum) : '۰';
+      bRule.appendChild(el('div', { class: 'row', style: 'align-items:center;gap:8px;margin-top:8px' }, [
+        el('button', { class: 'btn', id: 'division-rule-apply', text: '✔ ثبت سیاست و اعمال وزن‌ها به همه‌ی دسته‌ها', disabled: finalized ? true : null, onclick: () => {
+          if (roots.length < 1) { App.toast('ابتدا شخص اضافه کنید.', 'warn'); return; }
+          const activePol = C.setAllocationPolicy(st, { mode: relation.value === 'inheritance' ? 'law_ratio' : 'custom', relationMode: relation.value, inheritanceEnabled: relation.value === 'inheritance', personWeights: pol.personWeights });
+          const got = C.applyAllocationPolicyToEstates(st, activePol);
+          if (!got.ok) { App.toast(got.error || 'اعمال نشد', 'err'); return; }
+          save(); full(); App.toast('سیاست تقسیم ذخیره و به همه‌ی دسته‌ها اعمال شد؛ هنوز قبل از تخصیص نهایی قابل تغییر است.', 'ok');
+        } }),
+        relation.value === 'inheritance' ? el('button', { class: 'btn sec2', id: 'inheritance-suggest', text: 'پیشنهاد ۲:۱ برای پسر/دختر', disabled: finalized ? true : null, onclick: () => {
+          const sug = C.suggestInheritanceRatios(st); let n = 0;
+          roots.forEach(p => { if (sug[p.id] != null) { ir.ratios[p.id] = sug[p.id]; pol.personWeights[p.id] = sug[p.id]; n++; } });
+          if (!n) App.toast('ابتدا رابطه‌ی پسر/دختر را برای افراد انتخاب کنید.', 'warn'); else { ir.legalReviewed = false; C.setAllocationPolicy(st, pol); full(); }
+        } }) : null,
+      ]));
+      bRule.appendChild(el('div', { class: 'note', id: 'division-rule-summary', text: 'جمع وزن‌ها: ' + App.fa(sumWeights) + ' — ارزش مبنا: ' + sumText + ' تومان — سهم‌ها و مبلغ هدف دقیقاً از «وزن ÷ جمع وزن‌ها» محاسبه می‌شوند. خالی/صفر یعنی در این سیاست سهم نمی‌گیرد.' }));
+      if (preview && preview.rows.length) {
+        bRule.appendChild(el('div', { class: 'scroll' }, el('table', { class: 't', id: 'division-target-table' }, [
+          el('thead', null, el('tr', null, ['شخص', 'وزن', 'سهم دقیق', 'مبلغ هدف (تومان)'].map(h => el('th', { text: h })))),
+          el('tbody', null, preview.rows.map(r => el('tr', null, [el('td', { text: r.person.name }), el('td', { dir: 'ltr', text: C.fText(r.weight) }), el('td', { dir: 'ltr', text: C.fText(r.share) + ' (' + App.fa(C.fPct(r.share, 4)) + '%)' }), el('td', { dir: 'ltr', text: money(r.target) })])))
+        ])));
+      }
+    }
+
+    /* ۲) دسته‌ها */
     function drawCat() {
       bCat.innerHTML = '';
-      bCat.appendChild(el('h3', { style: 'margin-top:0', text: '۱) دسته‌ها و سهم هر نفر' }));
+      bCat.appendChild(el('h3', { style: 'margin-top:0', text: '۲) دسته‌ها و سهم هر نفر' }));
       if (!data) return;
       const tree = C.personTree(st), persons = tree.roots;
       bCat.appendChild(el('div', { class: 'note', text: 'هر سطر یک دسته است: ارزشش جمع ارزش زمین‌های همان دسته (در فهرست تقسیم) است و ضریب هر نفر را می‌توانید عوض کنید (مثلاً ۸، ۸، ۱، ۴ یا ۱/۷). سهم = ضریب ÷ جمع ضریب‌ها. اگر شخصی زیرمجموعه دارد، سهمش بین اعضا تقسیم می‌شود.' }));
@@ -115,7 +196,7 @@
     /* ۲) خانه‌ی شهر: چند فروشنده، چند خریدار */
     function drawHouse() {
       bHouse.innerHTML = '';
-      bHouse.appendChild(el('h3', { style: 'margin-top:0', text: '۲) خانه‌ی شهر' }));
+      bHouse.appendChild(el('h3', { style: 'margin-top:0', text: '۳) خانه‌ی شهر' }));
       const h = st.house, roots = C.personTree(st).roots;
       bHouse.appendChild(el('div', { class: 'note', text: 'هر فروشنده مبلغ زیر را می‌گیرد؛ جمع پرداختی را خریداران به نسبت «سهم خرید» می‌دهند (خالی = برابر). زمین‌های خریداران برای بقیه قابل برداشتن است.' }));
       const amt = el('input', { type: 'text', id: 'house-amt', dir: 'ltr', value: h.amount || '', placeholder: 'مثلاً 3000000000 یا 3 میلیارد', style: 'max-width:200px', onchange: (x) => { if (C.parseAdjust(x.target.value) == null) { App.toast('مبلغ نامعتبر است', 'warn'); return; } h.amount = x.target.value; refresh(); } });
@@ -144,7 +225,7 @@
     }
     function drawPeople() {
       bPeople.innerHTML = '';
-      bPeople.appendChild(el('h3', { style: 'margin-top:0', text: '۳) حساب هر نفر' }));
+      bPeople.appendChild(el('h3', { style: 'margin-top:0', text: '۴) حساب هر نفر' }));
       if (!data) { bPeople.appendChild(el('div', { class: 'box err', text: 'محاسبه ممکن نشد.' })); return; }
       const grid = el('div', { class: 'pgrid', id: 'sum-table' });
       data.groups.forEach(g => {
@@ -191,7 +272,7 @@
     /* ۴) تقسیم خودکار متوازن */
     function drawAuto() {
       bAuto.innerHTML = '';
-      bAuto.appendChild(el('h3', { style: 'margin-top:0', text: '۴) تقسیم خودکار و جبران کسری‌ها' }));
+      bAuto.appendChild(el('h3', { style: 'margin-top:0', text: '۵) تقسیم خودکار و جبران کسری‌ها' }));
       bAuto.appendChild(el('div', { class: 'note', text: 'هدف: ارزش زمین هر نفر تا حد ممکن برابر حقِ نهایی‌اش (اعتبار) شود تا کمترین طلب/بدهی نقدی بماند. زمین‌های قفل‌شده (🔒) هرگز جابه‌جا نمی‌شوند. اول پیش‌نمایش می‌بینید، بعد اعمال می‌کنید.' }));
       const mode = el('select', { id: 'auto-mode' }, [['free', 'فقط زمین‌های آزاد را پخش کن (دست‌ها را عوض نکن)'], ['compensate', 'آزادها + چند جابه‌جایی برای جبران (از پرزمین‌ها به کم‌زمین‌ها)'], ['reset', 'همه‌چیز را از نو تقسیم کن (به‌جز قفل‌ها)']].map(a => el('option', { value: a[0], text: a[1] })));
       mode.value = ui.mode; mode.onchange = () => { ui.mode = mode.value; };
@@ -222,7 +303,7 @@
     }
     function drawPick() {
       bPick.innerHTML = '';
-      bPick.appendChild(el('h3', { style: 'margin-top:0', text: '۵) زمین‌ها: مساحت، قیمت، دسته و «دست کی است»' }));
+      bPick.appendChild(el('h3', { style: 'margin-top:0', text: '۶) زمین‌ها: مساحت، قیمت، دسته و «دست کی است»' }));
       bPick.appendChild(el('div', { class: 'note', text: 'ارزش هر زمین همیشه «مساحت × قیمت هر متر» است؛ هر کدام را اینجا عوض کنید همه‌ی عددهای صفحه فوراً دوباره حساب می‌شود. 🔒 یعنی این زمین برای همان نفر ثبت شده و تقسیم خودکار و دیگران دست نمی‌زنند. تیک «در تقسیم» را بردارید تا این زمین از تقسیم بیرون بماند.' }));
       const q = el('input', { type: 'search', id: 'pick-q', placeholder: 'جست‌وجوی نام زمین…', value: ui.q });
       const tree = C.personTree(st);
@@ -300,7 +381,7 @@
     /* ۶) لیست نهایی هر نفر + دانلودها */
     function drawRes() {
       bRes.innerHTML = '';
-      bRes.appendChild(el('h3', { style: 'margin-top:0', text: '۶) لیست نهایی زمین‌های هر نفر' }));
+      bRes.appendChild(el('h3', { style: 'margin-top:0', text: '۷) لیست نهایی زمین‌های هر نفر' }));
       if (!data) return;
       bRes.appendChild(el('div', { class: 'row' }, [
         el('button', { class: 'btn', text: '🖨 چاپ همه', onclick: () => App.printHtml(sheetHtml(data, st)) }),
@@ -308,6 +389,18 @@
         el('button', { class: 'btn sec2', id: 'dl-xlsx', text: '📊 اکسل همه', onclick: () => exportXlsx(data, st) }),
         el('button', { class: 'btn sec2', id: 'dl-zip', text: '🗜 فایل جدا برای هر نفر (ZIP)', onclick: () => exportZip(data, st) }),
         el('button', { class: 'btn sec2', text: '📋 کپی متن', onclick: () => copyText(textOf(data)) })]));
+      const finalized = !!(st.allocationRun && st.allocationRun.finalized);
+      bRes.appendChild(el('div', { class: finalized ? 'box ok' : 'box info', id: 'finalization-box' }, [
+        el('b', { text: finalized ? '✔ تقسیم نهایی و منتشر شده است' : 'ثبت نهایی هنوز انجام نشده است' }),
+        el('span', { text: finalized ? ' — زمین‌های انتخاب‌شده قفل‌اند و نسخه‌ی قابل مشاهده‌ی دیگران همین است.' : ' — ابتدا پیشنهادها را بررسی و حسابرسی کنید؛ سپس قفل و انتشار را تأیید کنید.' }),
+        el('button', { class: 'btn sm ' + (finalized ? 'sec2' : ''), id: 'finalize-division', text: finalized ? 'بازکردن قفل برای بازبینی' : '✔ تکمیل نهایی و انتشار', onclick: () => {
+          if (finalized) { const r = C.reopenAllocation(st); if (r.ok) { save(); full(); App.toast('قفل برای بازبینی باز شد.', 'warn'); } return; }
+          App.confirm('تکمیل نهایی و انتشار', 'پیشنهاد فعلی و فهرست زمین‌های انتخاب‌شده پس از حسابرسی قفل و برای دیگران منتشر شود؟ بعداً برای تغییر باید قفل را باز کنید.', () => {
+            const r = C.finalizeAllocation(st); if (!r.ok) { App.toast(r.errors.join(' | '), 'err'); return; }
+            save(); full(); App.toast('تقسیم نهایی شد و انتخاب‌ها قفل و منتشر شدند.', 'ok');
+          }, 'قفل و انتشار');
+        } })
+      ]));
       data.people.forEach(x => {
         const pct = R(C.fDiv(C.fMul(x.heldValue, C.frac(10000)), C.fSign(data.total) > 0 ? data.total : C.frac(1))) / 100;
         const w = el('div', { class: 'card', 'data-pid': x.person.id, style: 'break-inside:avoid' });
@@ -329,7 +422,7 @@
     /* ۷) بازرسی */
     function drawAudit() {
       bAud.innerHTML = '';
-      bAud.appendChild(el('h3', { style: 'margin-top:0', text: '۷) بازرسی محاسبات' }));
+      bAud.appendChild(el('h3', { style: 'margin-top:0', text: '۸) بازرسی محاسبات' }));
       const items = C.auditState(st);
       const bad = items.filter(x => x.level === 'err').length, warn = items.filter(x => x.level === 'warn').length;
       bAud.appendChild(el('div', { class: 'box ' + (bad ? 'err' : warn ? 'warn' : 'ok'), id: 'audit-sum', text: bad ? bad + ' خطا و ' + warn + ' هشدار' : warn ? 'خطایی نیست؛ ' + warn + ' هشدار' : 'همه‌چیز درست است' }));
@@ -342,7 +435,7 @@
     const b64d = (t) => JSON.parse(decodeURIComponent(escape(atob(t))));
     function drawCode() {
       bCode.innerHTML = '';
-      bCode.appendChild(el('h3', { style: 'margin-top:0', text: '۸) ارسال انتخاب من / دریافت انتخاب شرکا' }));
+      bCode.appendChild(el('h3', { style: 'margin-top:0', text: '۹) ارسال انتخاب من / دریافت انتخاب شرکا' }));
       bCode.appendChild(el('div', { class: 'note', text: 'انتخاب‌های هرکس روی گوشی خودش می‌ماند. شریک «کد انتخاب» می‌سازد و می‌فرستد؛ نسخه‌ی اصلی آن را اینجا وارد می‌کند تا زمین‌های او ثبت شود.' }));
       const who = el('select', { id: 'code-who' }, C.personTree(st).roots.map(x => el('option', { value: x.id, text: x.name })));
       const out = el('textarea', { id: 'code-out', readonly: true, style: 'min-height:60px;direction:ltr;font-size:11px', placeholder: 'کد اینجا ساخته می‌شود' });
@@ -392,7 +485,7 @@
     /* ۷) اشخاص */
     function drawPersons() {
       bPer.innerHTML = '';
-      bPer.appendChild(el('h3', { style: 'margin-top:0', text: '۹) اشخاص' }));
+      bPer.appendChild(el('h3', { style: 'margin-top:0', text: '۱۰) اشخاص' }));
       C.personTree(st).roots.forEach(p => bPer.appendChild(el('div', { class: 'row', style: 'margin:3px 0' }, [
         el('input', { type: 'text', value: p.name, class: 'grow', onchange: (e) => { p.name = e.target.value || p.name; full(); } }),
         el('button', { class: 'btn sm dng', text: 'حذف', onclick: () => App.confirm('حذف شخص', '«' + App.esc(p.name) + '» و سهم‌ها و زمین‌های دستش حذف شود؟', () => { C.removePerson(st, p.id); full(); }, 'حذف') })])));
@@ -401,8 +494,8 @@
     }
 
     data = ev();
-    drawStrip(); drawPool(); drawCat(); drawHouse(); drawPeople(); drawAuto(); drawPick(); markRows(); drawRes(); drawAudit(); drawCode(); drawPersons();
-    [strip, bPool, bCat, bHouse, bPeople, bAuto, bPick, bRes, bAud, bCode, bPer].forEach(b => r.appendChild(b));
+    drawStrip(); drawPool(); drawRule(); drawCat(); drawHouse(); drawPeople(); drawAuto(); drawPick(); markRows(); drawRes(); drawAudit(); drawCode(); drawPersons();
+    [strip, bPool, bRule, bCat, bHouse, bPeople, bAuto, bPick, bRes, bAud, bCode, bPer].forEach(b => r.appendChild(b));
   }
 
   /* ---------- خروجی‌ها ---------- */
