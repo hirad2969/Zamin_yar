@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const App = window.App, C = App.C, el = App.el;
-  const M = App.map = { map: null, tileOk: 0, tileErr: 0 };
+  const M = App.map = { map: null, tileOk: 0, tileErr: 0, initialFitDone: false };
   const D = { precise: !!(window.matchMedia && matchMedia('(pointer:coarse)').matches), pts: [], mode: 'idle', sel: -1, markers: [], mids: [], shape: null, source: 'draw', meta: null };
   M.D = D;
   let drawLayer, savedLayer, previewLayer, searchMarker, savedById = {};
@@ -61,9 +61,12 @@
       else if (e.key === 'Escape' && M.focused && !(App.detect && App.detect.active)) M.focus(false);
     });
     renderSaved();
+    // شروع برنامه روی آخرین محدوده‌های ثبت/اندازه‌گیری‌شده می‌رود، نه مرکز ایران.
+    // جست‌وجو همچنان مستقل است و بعداً می‌تواند نمای نقشه را عوض کند.
+    setTimeout(() => M.fitSavedBounds(), 0);
   });
-  App.on('state', () => renderSaved());
-  App.on('tab', (t) => { if (t === 'map') renderSaved(); });
+  App.on('state', (change) => { if (change && change.resetView) M.initialFitDone = false; renderSaved(); if (!M.initialFitDone) setTimeout(() => M.fitSavedBounds(), 0); });
+  App.on('tab', (t) => { if (t === 'map') { renderSaved(); if (!M.initialFitDone) setTimeout(() => M.fitSavedBounds(), 0); } });
 
   /* ---------------- جست‌وجو ---------------- */
   function parseCoordQuery(q) {
@@ -347,6 +350,18 @@
   M.clearPreview = clearPreview;
 
   /* ---------------- زمین‌های ثبت‌شده ---------------- */
+  /** نمای پیش‌فرض روی تمام آخرین زمین‌های اندازه‌گیری‌شده/ثبت‌شده است. */
+  M.fitSavedBounds = function (force) {
+    if (!M.map || (!force && M.initialFitDone)) return false;
+    const rings = (App.S && App.S.parcels || []).filter(p => p.geometry && Array.isArray(p.geometry.ring) && p.geometry.ring.length >= 3).map(p => p.geometry.ring);
+    if (!rings.length) return false;
+    const bounds = L.latLngBounds([]);
+    rings.forEach(ring => ring.forEach(p => bounds.extend(ll(p))));
+    if (!bounds.isValid || !bounds.isValid()) return false;
+    M.map.fitBounds(bounds, { maxZoom: 16, padding: [36, 36], animate: false });
+    M.initialFitDone = true;
+    return true;
+  };
   function renderSaved() {
     if (!savedLayer) return;
     savedLayer.clearLayers(); savedById = {};

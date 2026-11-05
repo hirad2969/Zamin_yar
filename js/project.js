@@ -19,9 +19,11 @@
       ]),
       el('div', { class: 'note', text: App.storageOk ? 'ذخیره‌ی خودکار در مرورگر: فعال' : '⚠️ ذخیره‌ی خودکار در این مرورگر ممکن نیست؛ حتماً فایل پروژه بگیرید.' }),
     ]));
+    const listRev = C.listRevision ? C.listRevision(App.S) : { revision: 0, updatedAt: '' };
     r.appendChild(el('div', { class: 'card' }, [
       el('h3', { text: 'خلاصه' }),
       el('div', { html: 'زمین‌ها: <b>' + App.n(App.S.parcels.length, 0) + '</b> — اشخاص: <b>' + App.n(App.S.persons.length, 0) + '</b> — سناریوها: <b>' + App.n(App.S.scenarios.length, 0) + '</b> — نسخه‌ی تنظیمات: <b>' + App.n(App.S.settings.version, 0) + '</b>' }),
+      el('div', { class: 'note', text: 'نسخه‌ی فهرست زمین/اشخاص: ' + App.n(listRev.revision, 0) + (listRev.updatedAt ? ' — آخرین به‌روزرسانی: ' + App.fmtDate(listRev.updatedAt) : '') + '؛ در بازکردن فایل، نسخه‌ی جدیدتر مقدم است.' }),
     ]));
     const profile = App.S.profile || { name: 'پرونده‌ی اصلی' };
     const pname = el('input', { type: 'text', value: profile.name || '', style: 'min-width:220px' });
@@ -86,7 +88,19 @@
     f.text().then(t => {
       let s; try { s = JSON.parse(t); } catch (e) { App.toast('فایل JSON معتبر نیست: ' + e.message, 'err'); return; }
       if (!s || s.schema !== 1 || !s.settings || !Array.isArray(s.parcels) || !Array.isArray(s.persons)) { App.toast('این فایل، فایل پروژه‌ی زمین‌یار نیست.', 'err'); return; }
-      App.confirm('بازکردن پروژه', 'پروژه‌ی فعلی با محتوای فایل «' + App.esc(f.name) + '» (' + App.n(s.parcels.length, 0) + ' زمین) جایگزین شود؟', () => { App.setState(s); App.form.newParcel(true); render(); App.toast('پروژه باز شد'); }, 'جایگزین شود');
+      s = App.normalize(s);
+      const cmp = C.compareListRevision ? C.compareListRevision(s, App.S) : 1;
+      const rev = C.listRevision ? C.listRevision(s) : { revision: 0, updatedAt: '' };
+      const curRev = C.listRevision ? C.listRevision(App.S) : { revision: 0, updatedAt: '' };
+      const msg = cmp > 0
+        ? 'فهرست فایل از نظر updatedAt/نسخه جدیدتر است و جای فهرست فعلی می‌نشیند. نسخه‌ی فایل: ' + rev.revision + ' — نسخه‌ی فعلی: ' + curRev.revision + '. ادامه؟'
+        : cmp < 0
+          ? 'این فایل از فهرست فعلی قدیمی‌تر است و برای جلوگیری از overwrite شدن اصلاحات جدید باز نمی‌شود. نسخه‌ی فایل: ' + rev.revision + ' — نسخه‌ی فعلی: ' + curRev.revision + '.'
+          : 'نسخه‌ی فهرست برابر است. محتوای فایل «' + App.esc(f.name) + '» (' + App.n(s.parcels.length, 0) + ' زمین) جایگزین شود؟';
+      App.confirm('بازکردن پروژه', msg, () => {
+        if (cmp < 0) { App.toast('فهرست فعلی جدیدتر است؛ فایل قدیمی کنار گذاشته شد.', 'warn'); return; }
+        App.setState(s); App.form.newParcel(true); render(); App.toast('پروژه باز شد');
+      }, cmp > 0 ? 'اعمال نسخه‌ی جدیدتر' : 'جایگزین شود');
     });
   }
   App.on('tab', (t) => { if (t === 'project') render(); });

@@ -973,10 +973,45 @@
   /* وضعیت کل برنامه، تنظیمات و تاریخچه‌ی قیمت                         */
   /* ---------------------------------------------------------------- */
   function defaultInheritanceRule() {
-    return { mode: 'iran_preset', jurisdiction: 'iran_shia', legalReviewed: false, ratios: {}, relations: {}, debt: '', will: '', note: '' };
+    // قانون ایران فقط «پیشنهاد» است؛ تا وقتی کاربر آن را فعال و بازبینی نکند
+    // هیچ محاسبه‌ای نباید نسبت‌های آن را به‌عنوان حکم قطعی وارد کند.
+    return { mode: 'iran_preset', jurisdiction: 'iran_shia', enabled: false, legalReviewed: false, reviewedAt: '', ratios: {}, relations: {}, debt: '', will: '', note: '' };
   }
   function defaultAllocationPolicy() {
-    return { mode: 'ask', preserveExisting: true, indivisible: 'physical_then_cash', splitMode: 'area', allowCoownership: false, mixKeys: ['scope', 'grade', 'type', 'special'], personWeights: {}, resolutions: {}, includeUnclassified: true };
+    // relationMode عمداً مستقل است: تقسیم می‌تواند کاملاً قراردادی باشد و
+    // inheritanceRule تنها وقتی relationMode=inheritance شود مبنای پیشنهاد است.
+    return { mode: 'ask', relationMode: 'independent', inheritanceEnabled: false, preserveExisting: true, indivisible: 'physical_then_cash', splitMode: 'area', allowCoownership: false, mixKeys: ['scope', 'grade', 'type', 'special'], personWeights: {}, resolutions: {}, includeUnclassified: true, appliedToEstates: false, updatedAt: nowIso() };
+  }
+  function listRevision(state) {
+    const s = state || {}, meta = s.listRevision || {};
+    let latest = meta.updatedAt || '';
+    ['parcels', 'persons', 'estates'].forEach(k => (s[k] || []).forEach(x => {
+      const at = x && (x.updatedAt || x.createdAt || '');
+      if (at && (!latest || String(at) > String(latest))) latest = at;
+    }));
+    const nums = [Number(meta.revision) || 0];
+    ['parcels', 'persons', 'estates'].forEach(k => (s[k] || []).forEach(x => { if (x && Number.isFinite(Number(x.revision))) nums.push(Number(x.revision)); }));
+    return { revision: Math.max.apply(Math, nums), updatedAt: latest || '', source: meta.source || '' };
+  }
+  function touchListRevision(state, source) {
+    if (!state) return null;
+    const old = listRevision(state), at = nowIso();
+    state.listRevision = { revision: old.revision + 1, updatedAt: at, source: source || old.source || 'local' };
+    return state.listRevision;
+  }
+  /** مقایسه‌ی دو فهرست: مقدار مثبت یعنی a جدیدتر از b است. */
+  function compareListRevision(a, b) {
+    const x = listRevision(a), y = listRevision(b);
+    // وقتی هر دو فایل نسخه‌ی صریح دارند، revision قابل اتکاتر از ساعت دستگاه است؛
+    // updatedAt برای فایل‌های قدیمیِ بدون revision و حالت مساوی fallback است.
+    if (x.revision > 0 && y.revision > 0 && x.revision !== y.revision) return x.revision > y.revision ? 1 : -1;
+    if (x.updatedAt && y.updatedAt && x.updatedAt !== y.updatedAt) return x.updatedAt > y.updatedAt ? 1 : -1;
+    if (x.revision !== y.revision) return x.revision > y.revision ? 1 : -1;
+    return 0;
+  }
+  function preferNewerList(current, incoming) {
+    const cmp = compareListRevision(incoming, current);
+    return { state: cmp > 0 ? incoming : current, source: cmp > 0 ? 'incoming' : 'current', compare: cmp, incoming: listRevision(incoming), current: listRevision(current) };
   }
   function ensureTrash(state) {
     state.trash = state.trash || { parcels: [], persons: [], estates: [] };
@@ -1037,6 +1072,7 @@
       settingsHistory: [{ version: s.version, at: s.updatedAt, settings: clone(s), reason: 'نسخه‌ی اولیه' }],
       parcels: [], persons: [], estates: [], scenarios: [], log: [],
       profile: newProfileMeta('پرونده‌ی اصلی', null),
+      listRevision: { revision: 0, updatedAt: nowIso(), source: 'new' },
       trash: { parcels: [], persons: [], estates: [] },
       inheritanceRule: defaultInheritanceRule(), allocationPolicy: defaultAllocationPolicy(), allocationRun: null,
       house: { amount: '', receivers: [], payer: '' }, adjust: {},
@@ -1195,9 +1231,11 @@
   }
   /** ثبت سهم نسبی شخص در یک دسته؛ ورودی «1»، «4/3»، «۱٫۵» یا خالی/صفر برای حذف. نامعتبر ⇒ null */
   function setEstateWeight(state, estateId, personId, weight) {
+    if (state && state.allocationRun && state.allocationRun.finalized) return null;
     const e = findEstate(state, estateId);
     if (!e) return null;
     e.weights = e.weights || {};
+    if (state && state.allocationPolicy) state.allocationPolicy.appliedToEstates = false;
     if (weight == null || weight === '') { delete e.weights[personId]; return F0(); }
     const f = toFrac(weight);
     if (!f || fSign(f) < 0) return null;
@@ -1784,6 +1822,11 @@
       if (state.house.buyerShares) delete state.house.buyerShares[personId];
     }
     if (state.familySplits) delete state.familySplits[personId];
+    if (state.inheritanceRule) {
+      if (state.inheritanceRule.ratios) delete state.inheritanceRule.ratios[personId];
+      if (state.inheritanceRule.relations) delete state.inheritanceRule.relations[personId];
+    }
+    if (state.allocationPolicy && state.allocationPolicy.personWeights) { delete state.allocationPolicy.personWeights[personId]; state.allocationPolicy.appliedToEstates = false; }
     (state.estates || []).forEach(e => { if (e.weights) delete e.weights[personId]; });
     (state.scenarios || []).forEach(sc => {
       Object.keys(sc.allocations || {}).forEach(k => {
@@ -2407,9 +2450,10 @@
     return isNum(v.total) ? frac(Math.round(v.total)) : F0();
   }
   function normalizeAllocationPolicy(state, policy) {
-    const src = policy || {};
+    const base = state && state.allocationPolicy && typeof state.allocationPolicy === 'object' ? state.allocationPolicy : {};
+    const src = Object.assign({}, base, policy || {});
     const out = Object.assign({
-      mode: state && state.allocationPolicy && state.allocationPolicy.mode ? state.allocationPolicy.mode : 'ask',
+      mode: 'ask', relationMode: 'independent', inheritanceEnabled: false,
       preserveExisting: true,
       indivisible: 'physical_then_cash',
       splitMode: 'area',
@@ -2418,8 +2462,11 @@
       personWeights: {},
       resolutions: {},
       includeUnclassified: true,
+      appliedToEstates: false,
     }, src);
     if (!ALLOCATION_MODES[out.mode]) out.mode = 'equal_value';
+    if (['independent', 'inheritance'].indexOf(out.relationMode) < 0) out.relationMode = out.mode === 'law_ratio' ? 'inheritance' : 'independent';
+    out.inheritanceEnabled = out.relationMode === 'inheritance' || out.mode === 'law_ratio' ? true : !!out.inheritanceEnabled;
     if (['area', 'percent', 'cash'].indexOf(out.splitMode) < 0) out.splitMode = 'area';
     if (out.splitMode === 'cash') out.indivisible = 'cash_only';
     else if (out.splitMode === 'area' || out.splitMode === 'percent') out.indivisible = 'physical_then_cash';
@@ -2430,6 +2477,105 @@
     out.includeUnclassified = out.includeUnclassified !== false;
     out.preserveExisting = out.preserveExisting !== false;
     return out;
+  }
+  /** ثبت/تغییر مبنای تقسیم بدون تغییر هیچ زمین؛ نتیجه تا زمان تأیید فقط یک سیاست است. */
+  function setAllocationPolicy(state, patch) {
+    if (!state) return null;
+    if (state.allocationRun && state.allocationRun.finalized) return state.allocationPolicy || null;
+    state.allocationPolicy = normalizeAllocationPolicy(state, Object.assign({}, patch || {}));
+    state.allocationPolicy.updatedAt = nowIso();
+    return state.allocationPolicy;
+  }
+  function setAllocationPersonWeight(state, personId, weight) {
+    if (!state || (state.allocationRun && state.allocationRun.finalized) || !(state.persons || []).some(p => p.id === personId)) return null;
+    const f = toFrac(weight);
+    if (!f || fSign(f) < 0) return null;
+    state.allocationPolicy = normalizeAllocationPolicy(state, state.allocationPolicy);
+    state.allocationPolicy.personWeights[personId] = fPack(f);
+    state.allocationPolicy.appliedToEstates = false;
+    state.allocationPolicy.updatedAt = nowIso();
+    return f;
+  }
+  function setInheritanceRelation(state, personId, relation, ratio) {
+    if (!state || (state.allocationRun && state.allocationRun.finalized) || !(state.persons || []).some(p => p.id === personId)) return null;
+    state.inheritanceRule = state.inheritanceRule || defaultInheritanceRule();
+    state.inheritanceRule.relations = state.inheritanceRule.relations || {};
+    state.inheritanceRule.ratios = state.inheritanceRule.ratios || {};
+    state.inheritanceRule.relations[personId] = relation || 'other';
+    if (ratio != null && ratio !== '') {
+      const f = toFrac(ratio); if (!f || fSign(f) <= 0) return null;
+      state.inheritanceRule.ratios[personId] = fPack(f);
+    } else delete state.inheritanceRule.ratios[personId];
+    state.inheritanceRule.enabled = true;
+    state.inheritanceRule.legalReviewed = false;
+    state.inheritanceRule.updatedAt = nowIso();
+    state.allocationPolicy = normalizeAllocationPolicy(state, state.allocationPolicy);
+    state.allocationPolicy.relationMode = 'inheritance'; state.allocationPolicy.inheritanceEnabled = true; state.allocationPolicy.appliedToEstates = false; state.allocationPolicy.updatedAt = nowIso();
+    return state.inheritanceRule;
+  }
+  /** پیشنهاد شفاف و قابل‌ویرایش؛ این تابع هرگز آن را به‌عنوان حکم قطعی اعمال نمی‌کند. */
+  function suggestInheritanceRatios(state) {
+    const out = {}, rels = state && state.inheritanceRule && state.inheritanceRule.relations || {};
+    (state && state.persons || []).forEach(p => {
+      const rel = rels[p.id];
+      if (rel === 'son') out[p.id] = '2';
+      else if (rel === 'daughter') out[p.id] = '1';
+      else if (rel === 'spouse') out[p.id] = '1';
+    });
+    return out;
+  }
+  /** نسبت‌های سیاست جاری؛ همه‌ی خروجی‌ها کسر دقیق دارند. */
+  function allocationPolicyShares(state, persons, policy) {
+    persons = persons || personTree(state).roots;
+    const pol = normalizeAllocationPolicy(state, policy || state.allocationPolicy);
+    let ws;
+    if (pol.mode === 'equal_value' || pol.mode === 'equal_mix') ws = persons.map(() => F1());
+    else {
+      const law = pol.relationMode === 'inheritance' || pol.mode === 'law_ratio' ? inheritanceRatios(state) : {};
+      ws = persons.map(p => {
+        const raw = pol.personWeights[p.id] != null ? pol.personWeights[p.id] : (law[p.id] != null ? law[p.id] : null);
+        const f = raw == null ? personWeightFrac(p) : toFrac(raw);
+        return f && fSign(f) > 0 ? f : F0();
+      });
+    }
+    let sum = F0(); ws.forEach(w => { sum = fAdd(sum, w); });
+    if (fSign(sum) <= 0 && persons.length) { ws = persons.map(() => F1()); sum = frac(persons.length); }
+    return { policy: pol, persons, weights: ws, sum, shares: ws.map(w => fSign(sum) > 0 ? fDiv(w, sum) : F0()) };
+  }
+  /** اجرای سیاست فقط با تأیید صریح کاربر: وزن هر دسته را از همان کسرها پر می‌کند. */
+  function applyAllocationPolicyToEstates(state, policy) {
+    if (!state) return { ok: false, error: 'وضعیت پروژه پیدا نشد' };
+    if (state.allocationRun && state.allocationRun.finalized) return { ok: false, error: 'تقسیم نهایی و منتشر شده است؛ ابتدا قفل را باز کنید' };
+    const pol = normalizeAllocationPolicy(state, policy || state.allocationPolicy);
+    const roots = personTree(state).roots;
+    const law = pol.relationMode === 'inheritance' || pol.mode === 'law_ratio' ? inheritanceRatios(state) : {};
+    let changed = 0;
+    (state.estates || []).forEach(e => {
+      const weights = {};
+      roots.forEach(p => {
+        let f;
+        if (pol.mode === 'equal_value' || pol.mode === 'equal_mix') f = F1();
+        else f = toFrac(pol.personWeights[p.id] != null ? pol.personWeights[p.id] : (law[p.id] != null ? law[p.id] : null));
+        if (f && fSign(f) > 0) weights[p.id] = fPack(f);
+      });
+      e.weights = weights; changed++;
+    });
+    state.allocationPolicy = pol;
+    state.allocationPolicy.appliedToEstates = true;
+    state.allocationPolicy.appliedAt = nowIso();
+    state.allocationPolicy.updatedAt = nowIso();
+    return { ok: true, changed, policy: pol };
+  }
+  /** خلاصه‌ی مستقل از دسته‌ها برای نمایش «وزن، مجموع سهم و مبلغ هدف» با کسر دقیق. */
+  function allocationPolicyPreview(state, opts) {
+    opts = opts || {};
+    const pol = normalizeAllocationPolicy(state, opts.policy || state.allocationPolicy);
+    const roots = personTree(state).roots;
+    const ids = Array.isArray(opts.selectedIds) ? opts.selectedIds.map(String) : (typeof divisionParcelIds === 'function' ? divisionParcelIds(state, state.divisionSelection) : (state.parcels || []).map(p => p.id));
+    const selected = ids.map(id => (state.parcels || []).find(p => String(p.id) === String(id))).filter(Boolean).filter(p => pol.includeUnclassified || findEstate(state, p.estateId));
+    let total = F0(); selected.forEach(p => { total = fAdd(total, allocationValueF(state, p)); });
+    const sh = allocationPolicyShares(state, roots, pol);
+    return { ok: roots.length > 0, policy: pol, selectedIds: selected.map(p => p.id), total, weightSum: sh.sum, rows: roots.map((p, i) => ({ person: p, weight: sh.weights[i], share: sh.shares[i], target: fMul(total, sh.shares[i]), targetNum: fToNumber(fMul(total, sh.shares[i])) })) };
   }
   function allocationClassKey(p, policy) {
     const keys = policy.mixKeys || [];
@@ -2444,20 +2590,22 @@
     }).join('|');
   }
   function allocationShareFractions(state, persons, live, policy) {
+    const pol = normalizeAllocationPolicy(state, policy);
     let ws = persons.map(() => F0());
-    if (policy.mode === 'equal_value' || policy.mode === 'equal_mix') {
-      ws = persons.map(() => frac(1));
-    } else {
+    if (pol.mode === 'equal_value' || pol.mode === 'equal_mix') ws = persons.map(() => F1());
+    else {
+      const law = pol.relationMode === 'inheritance' || pol.mode === 'law_ratio' ? inheritanceRatios(state) : {};
       ws = persons.map((p, i) => {
-        const law = inheritanceRatios(state);
-        const raw = policy.personWeights[p.id] != null ? policy.personWeights[p.id] : (law[p.id] != null ? law[p.id] : null);
-        if (raw != null) { const f = toFrac(raw); if (f && fSign(f) > 0) return f; }
-        const r = live.people[i];
-        return r && r.entitlement ? r.entitlement : F0();
+        const raw = pol.personWeights[p.id] != null ? pol.personWeights[p.id] : (law[p.id] != null ? law[p.id] : null);
+        if (raw != null) { const f = toFrac(raw); if (f && fSign(f) >= 0) return f; }
+        // طرح سفارشیِ ناقص هم نباید پول را گم کند؛ در این حالت سهم قدیمی
+        // فقط به‌عنوان fallback موقت نمایش داده می‌شود و در UI هشدار می‌آید.
+        const r = live.people.find(x => x.person.id === p.id) || live.people[i];
+        return r && r.entitlement ? r.entitlement : personWeightFrac(p);
       });
     }
     let sum = F0(); ws.forEach(w => { sum = fAdd(sum, w); });
-    if (fSign(sum) <= 0) { ws = persons.map(() => frac(1)); sum = frac(persons.length || 1); }
+    if (fSign(sum) <= 0) { ws = persons.map(() => F1()); sum = frac(persons.length || 1); }
     return { weights: ws, sum, shares: ws.map(w => fDiv(w, sum)) };
   }
   function allocationPersonName(state, id) { const p = (state.persons || []).find(x => x.id === id); return p ? p.name : '—'; }
@@ -2515,6 +2663,7 @@
    */
   function automaticAllocationPlan(state, opts) {
     opts = opts || {};
+    if (state && state.allocationRun && state.allocationRun.finalized) return { ok: false, errors: ['تقسیم نهایی و منتشر شده است؛ ابتدا قفل را برای بازبینی باز کنید'] };
     const policy = normalizeAllocationPolicy(state, opts.policy || opts);
     if (policy.mode === 'ask') return { ok: false, errors: ['ابتدا ملاک تقسیم را انتخاب کنید: برابری در ارزش، برابری در ترکیب اموال، نسبت قانونی یا قانون سفارشی.'] };
     const ids = Array.isArray(opts.selectedIds) ? opts.selectedIds.map(String) : divisionParcelIds(state, state.divisionSelection);
@@ -2592,6 +2741,7 @@
   }
   function applyAutomaticAllocation(state, plan, opts) {
     opts = opts || {};
+    if (state && state.allocationRun && state.allocationRun.finalized) return { ok: false, errors: ['تقسیم نهایی و منتشر شده است؛ ابتدا قفل را برای بازبینی باز کنید'] };
     if (!plan || !plan.ok) return { ok: false, errors: ['طرح تخصیص معتبر نیست'] };
     if (plan.requiresInput) return { ok: false, requiresInput: true, request: plan.request, errors: ['برای ملک «' + plan.request.parcelName + '» روش تقسیم انتخاب نشده است'] };
     const changed = [], splitParts = [];
@@ -2674,12 +2824,15 @@
    *  اعتبار ریشه = جمع حق‌ها + خانه‌ی شهر + «سایر»؛ زیرمجموعه‌ها به نسبت سهمشان از اعتبار ریشه می‌برند
    *  مانده = اعتبار − ارزش زمین‌های دستش
    */
-  function divisionLive(state) {
+  function divisionLive(state, opts) {
+    opts = opts || {};
     const parcelsAll = state.parcels || [], estates = state.estates || [];
     const tree = personTree(state), errors = [], warns = [];
-    const parcels = parcelsAll.filter(p => inPool(state, p));
-    const outOfPool = parcelsAll.length - parcels.length;
     const gid = (p) => p.estateId && estates.some(e => e.id === p.estateId) ? p.estateId : '';
+    const selected = Array.isArray(opts.parcelIds) ? new Set(opts.parcelIds.map(String)) : null;
+    const includeUnclassified = opts.includeUnclassified !== false;
+    const parcels = parcelsAll.filter(p => (!selected || selected.has(String(p.id))) && inPool(state, p) && (includeUnclassified || !!gid(p)));
+    const outOfPool = parcelsAll.length - parcels.length;
     const rp = { persons: tree.roots, estates };
     const cats = estates.map(e => {
       const ps = parcels.filter(p => gid(p) === String(e.id));
@@ -2862,6 +3015,7 @@
    */
   function balancePlan(state, opts) {
     opts = opts || {};
+    if (state && state.allocationRun && state.allocationRun.finalized) return { ok: false, error: 'تقسیم نهایی و منتشر شده است؛ ابتدا قفل را برای بازبینی باز کنید' };
     const d = divisionLive(state), tree = personTree(state);
     let people = d.people, mode = opts.mode || 'free';
     let pool = state.parcels.filter(p => inPool(state, p));
@@ -2881,8 +3035,10 @@
     return { ok: true, moves: r.moves, before: d, after, objective: r.objective, state: st2, mode };
   }
   function applyPlan(state, plan) {
+    if (state && state.allocationRun && state.allocationRun.finalized) return { ok: false, error: 'تقسیم نهایی و منتشر شده است؛ ابتدا قفل را برای بازبینی باز کنید' };
     plan.moves.forEach(m => { const p = state.parcels.find(x => x.id === m.parcelId); if (p) p.holderId = m.to; });
     state.log = state.log || []; state.log.push({ at: nowIso(), msg: 'تقسیم خودکار متوازن: ' + plan.moves.length + ' زمین جابه‌جا/ثبت شد' });
+    return { ok: true };
   }
 
   /* ---------------------------------------------------------------- */
@@ -2923,6 +3079,31 @@
     if (over) add('warn', over + ' نفر بیش از دو برابر اعتبارشان زمین برداشته‌اند (' + worst + ')');
     return out;
   }
+  /** ثبت نهایی/انتشار: ابتدا حسابرسی، سپس قفل فیزیکیِ انتخاب‌های جاری. */
+  function finalizeAllocation(state, opts) {
+    opts = opts || {};
+    if (!state) return { ok: false, errors: ['وضعیت پروژه پیدا نشد'] };
+    if (state.allocationRun && state.allocationRun.finalized) return { ok: false, errors: ['این تقسیم قبلاً نهایی و منتشر شده است'] };
+    if (state.allocationPolicy && state.allocationPolicy.relationMode === 'inheritance' && !(state.inheritanceRule && state.inheritanceRule.legalReviewed)) return { ok: false, errors: ['نسبت ارثی هنوز بازبینی و تأیید نشده است؛ یا بازبینی کنید یا مبنای مستقل را انتخاب کنید'] };
+    const audit = auditState(state), errors = audit.filter(x => x.level === 'err');
+    if (errors.length) return { ok: false, errors: errors.map(x => x.msg), audit };
+    const ids = Array.isArray(opts.selectedIds) ? opts.selectedIds.map(String) : divisionParcelIds(state, state.divisionSelection);
+    const lockedIds = [];
+    (state.parcels || []).forEach(p => {
+      if (ids.indexOf(String(p.id)) >= 0 && inPool(state, p) && holderOfParcel(state, p)) { p.locked = true; p.finalizedLock = true; lockedIds.push(p.id); }
+    });
+    state.allocationRun = Object.assign({}, state.allocationRun || {}, { id: (state.allocationRun && state.allocationRun.id) || uid('alloc'), finalized: true, publishedAt: nowIso(), lockedIds, selectedIds: ids, policy: clone(state.allocationPolicy || {}), relationMode: state.allocationPolicy && state.allocationPolicy.relationMode || 'independent' });
+    state.log = state.log || []; state.log.push({ at: nowIso(), msg: 'تکمیل نهایی و انتشار تقسیم — ' + lockedIds.length + ' زمین قفل شد' });
+    return { ok: true, lockedIds, publishedAt: state.allocationRun.publishedAt, audit };
+  }
+  function reopenAllocation(state) {
+    if (!state || !state.allocationRun || !state.allocationRun.finalized) return { ok: false, errors: ['تقسیم نهایی‌شده‌ای وجود ندارد'] };
+    const ids = new Set(state.allocationRun.lockedIds || []);
+    (state.parcels || []).forEach(p => { if (ids.has(p.id) && p.finalizedLock) { p.locked = false; delete p.finalizedLock; } });
+    state.allocationRun.finalized = false; state.allocationRun.reopenedAt = nowIso();
+    state.log = state.log || []; state.log.push({ at: nowIso(), msg: 'قفل تقسیم برای بازبینی دوباره باز شد' });
+    return { ok: true };
+  }
   function recalcAllValuations(state) { (state.parcels || []).forEach(p => applyValuation(p, state.settings, 'بازمحاسبه‌ی ارزش (بازرسی)')); }
 
   /* ---------------------------------------------------------------- */
@@ -2938,7 +3119,8 @@
     splitDelimited, importTable, importText, importGeoJSON, importKML, buildPreview,
     SCOPES, GRADES, AGRI, FARM, RES, URBAN_USES, METHODS,
     defaultSettings, cellKey, suggestRuralGrade, featureScore, valuate, currentValuation, applyValuation, newParcel,
-    newState, addParcel, saveParcel, removeParcel, updateSettings, defaultInheritanceRule, defaultAllocationPolicy, createProfilePackage, restoreFromTrash, inheritanceRatios,
+    newState, addParcel, saveParcel, removeParcel, updateSettings, defaultInheritanceRule, defaultAllocationPolicy, createProfilePackage, restoreFromTrash, inheritanceRatios, suggestInheritanceRatios,
+    listRevision, touchListRevision, compareListRevision, preferNewerList,
     addPerson, setPersonWeight, personWeightFrac, createScenario,
     setAllocation, setEqualAllocation, allocFrac, allocSum, evaluateScenario,
     // دسته‌های اموال (چند منبع با سهم متفاوت) و مبنای قیمت سناریو
@@ -2950,9 +3132,9 @@
     // پرونده‌ی زنده
     parcelSnap, caseParcels, createCase, convertScenarioToCase, addSection, setSectionWeight, sectionWeightFrac, addDeal, removePerson, evaluateCase, parseAdjust, sectionsFromEstates,
     // تقسیم زنده‌ی نسخه‌ی ۲ + ابزارهای انتخاب/تخصیص
-    divisionLive, canTake, setHolder, holderOfParcel, coOwnersOfParcel, sellerId, buyerIds, parcelLive, inPool, personTree, addSubPerson, removeSubPerson, balancePlan, applyPlan, balanceSearch, cashPlan, auditState, recalcAllValuations, houseNormal,
+    divisionLive, canTake, setHolder, holderOfParcel, coOwnersOfParcel, sellerId, buyerIds, parcelLive, inPool, personTree, addSubPerson, removeSubPerson, balancePlan, applyPlan, balanceSearch, cashPlan, auditState, finalizeAllocation, reopenAllocation, recalcAllValuations, houseNormal,
     normalizeDivisionSelection, parcelMatchesDivisionFilter, divisionTypeKey, divisionTypeLabel, divisionParcelIds, setDivisionSelection, sortDivisionParcels,
     setFamilySplitCount, setFamilyMember, familyBreakdown, randomAllocate,
-    ALLOCATION_MODES, ALLOCATION_SPLITS, normalizeAllocationPolicy, automaticAllocationPlan, applyAutomaticAllocation,
+    ALLOCATION_MODES, ALLOCATION_SPLITS, normalizeAllocationPolicy, setAllocationPolicy, setAllocationPersonWeight, setInheritanceRelation, allocationPolicyShares, applyAllocationPolicyToEstates, allocationPolicyPreview, automaticAllocationPlan, applyAutomaticAllocation,
   };
 });

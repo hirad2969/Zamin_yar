@@ -173,6 +173,27 @@ t('صفحه‌ی تقسیم: دسته‌ها با ارزش و ضریب، حسا�
   ok(doc.getElementById('strip-box').textContent.indexOf('مصطفی') >= 0, 'نوار مانده');
 });
 
+t('صفحه‌ی تقسیم: سیاست مستقل/ارثی و وزن‌های شخصی در رابط دقیق و قابل اعمال است', () => {
+  const x = setup();
+  ok(doc.getElementById('rule-box') && doc.getElementById('division-relation-mode'), 'کارت مبنای تقسیم نیست');
+  eq(doc.getElementById('division-relation-mode').value, 'independent', 'پیش‌فرض نباید ارث قطعی باشد');
+  const weights = [[x.M, '1'], [x.E, '2'], [x.A, '2'], [x.H, '1']];
+  weights.forEach(([p, v]) => {
+    const inp = doc.querySelector('#rule-box input.division-weight[data-pid="' + p.id + '"]'); ok(inp, 'ورودی وزن ' + p.name + ' نیست'); change(inp, v);
+  });
+  click(doc.getElementById('division-rule-apply'));
+  eq(w.App.S.allocationPolicy.relationMode, 'independent'); eq(w.App.S.allocationPolicy.mode, 'custom');
+  eq(C.fText(C.toFrac(w.App.S.estates[0].weights[x.M.id])), '1');
+  eq(C.fText(C.divisionLive(w.App.S).people[0].parts[0].share), '1/6');
+  const mode = doc.getElementById('division-relation-mode'); change(mode, 'inheritance');
+  ok(doc.querySelectorAll('#rule-box select.division-relation').length === 4, 'رابطه‌های ارثی نمایش داده نشد');
+  const rels = [[x.M, 'spouse'], [x.E, 'son'], [x.A, 'son'], [x.H, 'daughter']];
+  rels.forEach(([p, v]) => { const s = doc.querySelector('#rule-box select.division-relation[data-pid="' + p.id + '"]'); change(s, v); });
+  click(doc.getElementById('inheritance-suggest'));
+  eq(w.App.S.inheritanceRule.enabled, true); eq(w.App.S.allocationPolicy.relationMode, 'inheritance');
+  ok(!w.App.S.inheritanceRule.legalReviewed, 'پیشنهاد ارث نباید خودکار حکم قطعی شود');
+});
+
 t('صفحه‌ی تقسیم: تغییر ضریب یک دسته در جدول ⇒ همه‌ی عددها فوراً دوباره حساب می‌شود', () => {
   const x = setup();
   const inp = doc.querySelector('#cat-table input.w[data-est="' + x.E2.id + '"][data-pid="' + x.A.id + '"]');
@@ -344,6 +365,7 @@ t('صفحه‌ی تقسیم ۲: تقسیم خودکار پیش‌نمایش و �
   eq(S.parcels.find(p => p.id === x.b).holderId, x.H.id, 'زمین قفل جابه‌جا شد');
   const d = C.divisionLive(S); eq(d.free.length, 0, 'آزاد مانده');
   ok(doc.getElementById('audit-sum'), 'پنل بازرسی نیست');
+  ok(doc.getElementById('finalize-division') && /تکمیل نهایی/.test(doc.getElementById('finalize-division').textContent), 'دکمه‌ی تکمیل نهایی نیست');
   ok(doc.getElementById('dl-zip') && doc.getElementById('dl-xlsx') && doc.querySelector('.dl-p-xlsx'), 'دکمه‌های دانلود نیست');
   const got = []; w.App.downloadBlob = (n, b) => got.push(n);
   click(doc.querySelector('.dl-p-xlsx')); click(doc.getElementById('dl-xlsx'));

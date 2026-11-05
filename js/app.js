@@ -18,6 +18,9 @@
     if (!s.house.sellers) s.house.sellers = (s.house.receivers || []).slice();      // نسخه‌ی قدیمی: دریافت‌کننده‌ها ⇒ فروشنده‌ها
     if (!s.house.buyers) s.house.buyers = s.house.payer ? [s.house.payer] : [];       // پرداخت‌کننده ⇒ خریدار
     if (!s.house.buyerShares) s.house.buyerShares = {};
+    if (!s.listRevision || typeof s.listRevision !== 'object') s.listRevision = C.listRevision ? C.listRevision(s) : { revision: 0, updatedAt: '' };
+    if (s.listRevision.revision == null) s.listRevision.revision = 0;
+    if (!s.listRevision.updatedAt) s.listRevision.updatedAt = (C.listRevision ? C.listRevision(s).updatedAt : '') || C.nowIso();
     if (!s.pool) s.pool = {};
     if (!s.adjust) s.adjust = {};
     if (!s.profile) s.profile = { id: C.uid('profile'), name: 'پرونده‌ی اصلی', parentId: null, createdAt: C.nowIso(), updatedAt: C.nowIso() };
@@ -26,7 +29,11 @@
     if (!s.inheritanceRule || typeof s.inheritanceRule !== 'object') s.inheritanceRule = C.defaultInheritanceRule ? C.defaultInheritanceRule() : { mode: 'iran_preset', jurisdiction: 'iran_shia', legalReviewed: false, ratios: {}, relations: {} };
     if (!s.inheritanceRule.ratios || typeof s.inheritanceRule.ratios !== 'object') s.inheritanceRule.ratios = {};
     if (!s.inheritanceRule.relations || typeof s.inheritanceRule.relations !== 'object') s.inheritanceRule.relations = {};
-    if (!s.allocationPolicy || typeof s.allocationPolicy !== 'object') s.allocationPolicy = C.defaultAllocationPolicy ? C.defaultAllocationPolicy() : { mode: 'equal_value', preserveExisting: true, indivisible: 'physical_then_cash', splitMode: 'area', mixKeys: ['scope', 'grade', 'type', 'special'], personWeights: {}, resolutions: {}, includeUnclassified: true };
+    if (s.inheritanceRule.enabled == null) s.inheritanceRule.enabled = false;
+    if (s.inheritanceRule.legalReviewed == null) s.inheritanceRule.legalReviewed = false;
+    if (!s.allocationPolicy || typeof s.allocationPolicy !== 'object') s.allocationPolicy = C.defaultAllocationPolicy ? C.defaultAllocationPolicy() : { mode: 'ask', relationMode: 'independent', inheritanceEnabled: false, preserveExisting: true, indivisible: 'physical_then_cash', splitMode: 'area', mixKeys: ['scope', 'grade', 'type', 'special'], personWeights: {}, resolutions: {}, includeUnclassified: true };
+    if (!s.allocationPolicy.relationMode) s.allocationPolicy.relationMode = s.allocationPolicy.mode === 'law_ratio' ? 'inheritance' : 'independent';
+    if (s.allocationPolicy.inheritanceEnabled == null) s.allocationPolicy.inheritanceEnabled = s.allocationPolicy.relationMode === 'inheritance';
     if (!s.allocationPolicy.personWeights || typeof s.allocationPolicy.personWeights !== 'object') s.allocationPolicy.personWeights = {};
     if (!s.allocationPolicy.resolutions || typeof s.allocationPolicy.resolutions !== 'object') s.allocationPolicy.resolutions = {};
     if (!s.familySplits || typeof s.familySplits !== 'object') s.familySplits = {};
@@ -62,6 +69,9 @@
     return App.seedState();
   };
   App.save = function () {
+    // هر ذخیره یک نسخه‌ی فهرست می‌سازد؛ هنگام واردکردن، نسخه‌ی جدیدتر
+    // جای فهرست قدیمی را می‌گیرد و داده‌ی اولیه‌ی کاربر بی‌دلیل overwrite نمی‌شود.
+    if (C.touchListRevision) C.touchListRevision(App.S, 'local');
     try { localStorage.setItem(KEY, JSON.stringify(App.S)); App.storageOk = true; }
     catch (e) {
       if (App.storageOk) App.toast('ذخیره‌ی خودکار در مرورگر ممکن نیست؛ حتماً از «پروژه ← ذخیره‌ی فایل پروژه» استفاده کنید.', 'warn');
@@ -69,7 +79,7 @@
     }
     const c = document.getElementById('cnt-parcels'); if (c) c.textContent = App.n(App.S.parcels.length);
   };
-  App.setState = function (s) { App.S = App.normalize(s); App.save(); App.emit('state'); };
+  App.setState = function (s) { App.S = App.normalize(s); App.save(); App.emit('state', { resetView: true }); };
 
   /* ---------- نمایش اعداد ---------- */
   App.n = (x, d) => (x == null || !isFinite(x)) ? '—' : Number(x).toLocaleString('fa-IR', { maximumFractionDigits: d == null ? 2 : d });

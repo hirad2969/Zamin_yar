@@ -1045,6 +1045,39 @@ t('انتخاب همه/فیلتر/تک‌زمین و حذف زمین', () => {
 t('preset ساده‌ی ایران: نسبت فرزندان فقط با بازبینی قابل پیشنهاد است', () => {
   const st = C.newState(); const son = C.addPerson(st, 'پسر', 1), daughter = C.addPerson(st, 'دختر', 1); st.inheritanceRule.jurisdiction = 'iran_shia'; st.inheritanceRule.relations[son.id] = 'son'; st.inheritanceRule.relations[daughter.id] = 'daughter'; const r = C.inheritanceRatios(st); eq(r[son.id], '2'); eq(r[daughter.id], '1');
 });
+t('تقسیم مستقل/سفارشی: وزن‌های شخصی مستقل از ارث و با کسر دقیق اعمال می‌شوند', () => {
+  const st = C.newState(); const e = C.addEstate(st, 'دارایی مستقل');
+  const land = C.newParcel({ name: 'زمین مستقل', scope: 'rural_outside', grade: 'grade1', estateId: e.id, areaComputed: 100 });
+  land.pricing.override = 1200000; C.addParcel(st, land);
+  const spouse = C.addPerson(st, 'همسر', 99), son1 = C.addPerson(st, 'پسر اول', 99), son2 = C.addPerson(st, 'پسر دوم', 99), daughter = C.addPerson(st, 'دختر', 99);
+  st.inheritanceRule.relations[spouse.id] = 'spouse'; st.inheritanceRule.relations[son1.id] = 'son'; st.inheritanceRule.relations[son2.id] = 'son'; st.inheritanceRule.relations[daughter.id] = 'daughter';
+  st.inheritanceRule.ratios = { [spouse.id]: '99', [son1.id]: '1', [son2.id]: '1', [daughter.id]: '1' };
+  C.setAllocationPolicy(st, { mode: 'custom', relationMode: 'independent', inheritanceEnabled: false, personWeights: { [spouse.id]: '1', [son1.id]: '2', [son2.id]: '2', [daughter.id]: '1' } });
+  const preview = C.allocationPolicyPreview(st);
+  eq(C.fText(preview.weightSum), '6'); eq(C.fText(preview.rows[0].share), '1/6'); eq(C.fText(preview.rows[1].share), '1/3'); eq(C.fText(preview.rows[3].target), '20000000');
+  const applied = C.applyAllocationPolicyToEstates(st); ok(applied.ok); eq(C.fText(C.toFrac(st.estates[0].weights[spouse.id])), '1');
+  const d = C.divisionLive(st); eq(C.fText(d.people[0].parts[0].share), '1/6'); eq(C.fToNumber(d.sumEntitlement), 120000000);
+});
+t('قانون ارث: فقط پس از فعال‌سازی سیاست وارد محاسبه می‌شود و نسبت پیشنهادی قابل تغییر است', () => {
+  const st = C.newState(); const e = C.addEstate(st, 'ارث'); const son = C.addPerson(st, 'پسر', 1), daughter = C.addPerson(st, 'دختر', 1);
+  const p = C.newParcel({ name: 'ملک', scope: 'rural_outside', estateId: e.id, areaComputed: 100 }); p.pricing.override = 1000000; C.addParcel(st, p);
+  st.inheritanceRule.relations[son.id] = 'son'; st.inheritanceRule.relations[daughter.id] = 'daughter';
+  const independent = C.allocationPolicyPreview(st); eq(C.fText(independent.rows[0].share), '1/2');
+  C.setAllocationPolicy(st, { mode: 'law_ratio', relationMode: 'inheritance', inheritanceEnabled: true, personWeights: { [son.id]: '2', [daughter.id]: '1' } });
+  const legal = C.allocationPolicyPreview(st); eq(C.fText(legal.rows[0].share), '2/3'); eq(C.fText(legal.rows[1].share), '1/3');
+  C.setAllocationPersonWeight(st, son.id, '3/2'); const changed = C.allocationPolicyPreview(st); eq(C.fText(changed.rows[0].share), '3/5');
+});
+t('نسخه‌ی فهرست: updatedAt/ revision جدیدتر بر نسخه‌ی قدیمی اولویت دارد', () => {
+  const old = C.newState(), newer = C.newState(); old.listRevision = { revision: 4, updatedAt: '2026-01-01T00:00:00.000Z' }; newer.listRevision = { revision: 5, updatedAt: '2026-02-01T00:00:00.000Z' };
+  eq(C.compareListRevision(newer, old), 1); eq(C.preferNewerList(old, newer).source, 'incoming'); eq(C.preferNewerList(newer, old).source, 'current');
+  const before = C.listRevision(newer).revision; C.touchListRevision(newer, 'test'); ok(C.listRevision(newer).revision > before);
+});
+t('تکمیل نهایی: بعد از حسابرسی زمین‌ها قفل و منتشر می‌شوند و برای بازبینی قابل بازشدن‌اند', () => {
+  const st = C.newState(), e = C.addEstate(st, 'نهایی'), a = C.addPerson(st, 'الف', 1), b = C.addPerson(st, 'ب', 1);
+  const p = C.newParcel({ name: 'قفل‌شونده', scope: 'rural_outside', estateId: e.id, areaComputed: 100 }); p.pricing.override = 1000000; C.addParcel(st, p); C.setEstateEqualWeights(st, e.id, [a.id, b.id]); C.setHolder(st, p.id, a.id, true);
+  const fin = C.finalizeAllocation(st); ok(fin.ok && st.allocationRun.finalized && p.locked); ok(!C.setHolder(st, p.id, b.id).ok, 'زمین نهایی‌شده نباید همزمان تغییر کند');
+  ok(!C.balancePlan(st, {}).ok, 'طرح تازه روی تقسیم منتشرشده نباید اجرا شود'); C.reopenAllocation(st); ok(!st.allocationRun.finalized && !p.locked); ok(C.setHolder(st, p.id, b.id, true).ok);
+});
 t('پروفایل مستقل و سطل بازگشت: حذف اشتباه قابل بازگردانی است', () => {
   const st = C.newState(); const e = C.addEstate(st, 'پروفایل مادر'); const p = mkParcel({ name: 'قابل بازگشت', areaComputed: 100, estateId: e.id }); C.addParcel(st, p); const person = C.addPerson(st, 'الف', 1); C.setHolder(st, p.id, person.id, true);
   const child = C.createProfilePackage(st, { parcelIds: [p.id], name: 'زیرپرونده' }); eq(child.parcels.length, 1); eq(child.persons.length, 1); eq(child.profile.parentId, st.profile.id);
