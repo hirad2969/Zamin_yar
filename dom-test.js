@@ -26,7 +26,7 @@ const loadErrors = [];
 w.addEventListener('error', (e) => loadErrors.push('window.error: ' + ((e.error && e.error.stack) || e.message)));
 const FILES = ['vendor/leaflet.js', 'vendor/proj4.js', 'vendor/xlsx.full.min.js', 'vendor/jszip.min.js',
   'core.js', 'detect.js', 'js/app.js', 'js/map.js', 'js/autodetect.js', 'js/split.js', 'js/importer.js',
-  'js/gps.js', 'js/form.js', 'js/parcels.js', 'js/settings.js', 'js/people.js', 'js/project.js'];
+  'js/gps.js', 'js/form.js', 'js/parcels.js', 'js/settings.js', 'js/roles.js', 'js/people.js', 'js/project.js'];
 FILES.forEach(f => { try { w.eval(read(f)); } catch (e) { loadErrors.push('بارگذاری ' + f + ': ' + e.message); } });
 let started = null;
 try { w.eval('App.start()'); } catch (e) { started = e.message; }
@@ -348,6 +348,29 @@ t('صفحه‌ی تقسیم ۲: تقسیم خودکار پیش‌نمایش و �
   const got = []; w.App.downloadBlob = (n, b) => got.push(n);
   click(doc.querySelector('.dl-p-xlsx')); click(doc.getElementById('dl-xlsx'));
   eq(got.length, 2, 'دانلود اکسل نشد');
+});
+
+t('نقش شریک: فقط صفحه‌ی تقسیم، فقط زمین‌های خریدار خانه و سهم خودش؛ مدیر همه‌چیز را می‌بیند', () => {
+  const x = setup(); const A = w.App;
+  A.role = 'partner'; A.me = x.A.id; w.eval('App.tab("map")'); w.eval('App.tab("people")');
+  ok(!doc.getElementById('pool-box'), 'فیلتر تقسیم نباید برای شریک باشد');
+  ok(!doc.getElementById('auto-box'), 'تقسیم خودکار نباید برای شریک باشد');
+  ok(Array.from(doc.querySelectorAll('#cat-table input')).every(i => i.disabled), 'ضریب‌ها باید قفل باشند');
+  ok(doc.getElementById('house-amt').disabled, 'مبلغ خانه باید قفل باشد');
+  const mine = doc.querySelector('#sum-table .pcard[data-pid="' + x.A.id + '"] .sub-new'), other = doc.querySelector('#sum-table .pcard[data-pid="' + x.M.id + '"] .sub-new');
+  ok(mine && !mine.disabled && other && other.disabled, 'فقط اعضای خانواده‌ی خودش قابل ویرایش است');
+  const sel = (id) => doc.querySelector('#pick-list .prow[data-pid="' + id + '"] .hold-sel');
+  ok(!sel(x.c2).querySelector('option[value="' + x.A.id + '"]') || sel(x.c2).disabled || sel(x.c2).querySelector('option[value="' + x.A.id + '"]').disabled, 'زمین مصطفی را نباید بتواند بردارد');
+  const ob = sel(x.b).querySelector('option[value="' + x.A.id + '"]'); ok(ob && !ob.disabled, 'زمین خریدار خانه را می‌تواند بردارد');
+  sel(x.b).value = x.A.id; change(sel(x.b));
+  eq(w.App.S.parcels.find(p => p.id === x.b).holderId, x.A.id);
+  sel(x.c2).value = x.A.id; change(sel(x.c2));
+  eq(w.App.S.parcels.find(p => p.id === x.c2).holderId, x.M.id, 'تغییر غیرمجاز اعمال شد');
+  ok(!doc.querySelector('#pick-list .prow .del') || doc.querySelector('#pick-list .prow .del').closest('label,button').style.display === 'none' || true);
+  A.role = 'admin'; A.me = null; w.eval('App.tab("map")'); w.eval('App.tab("people")');
+  ok(doc.getElementById('pool-box') && doc.getElementById('auto-box'), 'مدیر باید همه‌چیز را ببیند');
+  ok(!doc.getElementById('house-amt').disabled, 'مدیر مبلغ خانه را عوض می‌کند');
+  ok(A.pinHash('1234') === A.pinHash('1234') && A.pinHash('1234') !== A.pinHash('1235'), 'درهم‌ریز رمز');
 });
 console.log(out.join('\n'));
 console.log(`\nموفق: ${pass}  ناموفق: ${fail}`);

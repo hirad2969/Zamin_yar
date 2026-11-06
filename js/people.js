@@ -27,6 +27,8 @@
     const r = root(); r.innerHTML = '';
     const st = S();
     App.normalize(st);
+    const adm = App.isAdmin ? App.isAdmin() : true, meR = adm ? null : (App.meRoot && App.meRoot());
+    const famOf = (id) => { const t = C.personTree(st); return meR && t.rootOf[id] === meR.id; };
     r.appendChild(el('h2', { text: 'تقسیم زمین‌ها' }));
     r.appendChild(el('div', { class: 'note', text: 'هر عدد اینجا خودکار و دقیق حساب می‌شود: ارزش هر زمین = مساحت × قیمت هر متر؛ حق هر نفر = ارزش دسته × سهم او؛ مانده = حق + خانه‌ی شهر + سایر − ارزش زمین‌هایی که دستش است. مساحت و قیمت را همین‌جا در لیست زمین‌ها هم می‌توانید اصلاح کنید.' }));
     const strip = el('div', { id: 'strip-box', class: 'strip' });
@@ -34,8 +36,30 @@
     const bPool = mk('pool-box'), bCat = mk('cat-box'), bHouse = mk('house-box'), bPeople = mk('sum-box'), bAuto = mk('auto-box'), bPick = mk('pick-box'),
       bRes = mk('res-box'), bAud = mk('audit-box'), bCode = mk('code-box'), bPer = mk('persons-box');
     let data = null; const rows = {};
-    const refresh = () => { save(); data = ev(); drawStrip(); drawPool(); drawCat(); drawPeople(); drawHouse(); drawAuto(); drawRes(); drawAudit(); markRows(); };
+    const refresh = () => { save(); data = ev(); drawStrip(); drawPool(); drawCat(); drawPeople(); drawHouse(); drawAuto(); drawRes(); drawAudit(); markRows(); roleLock(); };
     const full = () => { save(); ui.plan = null; render(); };
+    /** شریک: فقط زمین‌های خریدار خانه و سهم خودش (آزاد کردن زمین خودش یا برداشتن برای خودش) */
+    const mayAssign = (p, targetId) => {
+      if (adm) return true;
+      if (!meR) return false;
+      const t = C.personTree(st), cur = C.holderOfParcel(st, p, t);
+      if (!targetId) return !!cur && famOf(cur);
+      return famOf(targetId) && (!cur || famOf(cur) || C.canTake(st, p.id, targetId).ok);
+    };
+    /** قفل رابط برای شریک: همه‌ی ورودی‌ها غیرفعال به‌جز اعضای خانواده‌ی خودش و انتخاب «دست کی» */
+    function roleLock() {
+      if (adm) return;
+      [bCat, bHouse, bPeople, bPick, bRes, bCode].forEach(b => b.querySelectorAll('input,select,textarea,button').forEach(x => {
+        const own = x.closest('.pcard') && meR && x.closest('.pcard').getAttribute('data-pid') === meR.id && /sub-/.test(x.className);
+        const pick = x.classList.contains('hold-sel') || x.id === 'pick-q' || x.id === 'pick-flt';
+        const safe = x.closest('#res-box') || x.closest('#code-box');
+        if (!(own || pick || safe)) { x.disabled = true; }
+      }));
+      ['#code-in', '#code-apply'].forEach(q => { const x = bCode.querySelector(q); if (x) (x.closest('label') || x).style.display = 'none'; });
+      const who = bCode.querySelector('#code-who'); if (who && meR) { who.value = meR.id; who.disabled = true; }
+      bPick.querySelectorAll('.del,.lock,.inpool,.in-area,.in-price,.est-sel').forEach(x => { const lab = x.closest('label') || x; if (!x.classList.contains('est-sel')) lab.style.display = 'none'; });
+      bPick.querySelectorAll('.prow').forEach(rw => { const e = rows[rw.getAttribute('data-pid')]; if (e && e.hSel) { Array.from(e.hSel.options).forEach(o => { if (!mayAssign(e.p, o.value)) o.disabled = true; }); if (!Array.from(e.hSel.options).some(o => !o.disabled && o.value !== e.hSel.value)) e.hSel.disabled = true; } });
+    }
 
     function drawStrip() {
       strip.innerHTML = '';
@@ -234,6 +258,7 @@
         const dSel = el('select', { class: 'est-sel', onchange: (e) => { p.estateId = e.target.value || null; refresh(); } }, [el('option', { value: '', text: C.NO_ESTATE_NAME })].concat(st.estates.map(e => el('option', { value: e.id, text: e.name }))));
         dSel.value = p.estateId || '';
         const hSel = el('select', { class: 'hold-sel', onchange: (e) => {
+          if (!mayAssign(p, e.target.value || null)) { App.toast('شریک فقط زمین‌های خریدار خانه و سهم خودش را می‌تواند تغییر دهد', 'warn'); e.target.value = C.holderOfParcel(st, p); return; }
           const res = C.setHolder(st, p.id, e.target.value || null);
           if (!res.ok) { App.toast(res.reason, 'warn'); e.target.value = C.holderOfParcel(st, p); return; }
           refresh();
@@ -261,7 +286,7 @@
         list.appendChild(rw);
       });
       bPick.appendChild(list);
-      const apply = () => { ui.q = q.value; ui.flt = flt.value; markRows(); };
+      const apply = () => { ui.q = q.value; ui.flt = flt.value; markRows(); roleLock(); };
       q.addEventListener('input', apply); flt.addEventListener('change', apply);
     }
     function markRows() {
@@ -334,6 +359,8 @@
       const bad = items.filter(x => x.level === 'err').length, warn = items.filter(x => x.level === 'warn').length;
       bAud.appendChild(el('div', { class: 'box ' + (bad ? 'err' : warn ? 'warn' : 'ok'), id: 'audit-sum', text: bad ? bad + ' خطا و ' + warn + ' هشدار' : warn ? 'خطایی نیست؛ ' + warn + ' هشدار' : 'همه‌چیز درست است' }));
       items.forEach(x => bAud.appendChild(el('div', { class: 'ln audit-' + x.level, text: (x.level === 'ok' ? '✔ ' : x.level === 'warn' ? '⚠ ' : '✘ ') + x.msg.replace(/^[✔✘] /, '') })));
+      if (items.some(x => x.fix === 'simplify')) bAud.appendChild(el('button', { class: 'btn sm sec2', id: 'audit-simplify', text: 'ساده‌سازی مرزهای پرپیچ‌وخم', onclick: () => { const n = C.simplifyParcels(st, 8, 0.01); App.toast(App.n(n, 0) + ' مرز ساده شد', 'ok'); full(); } }));
+      if (items.some(x => x.fix === 'simplify')) bAud.appendChild(el('button', { class: 'btn sm sec2', id: 'audit-rect', text: 'مستطیل‌کردن مرزهای خودکارِ پرپیچ‌وخم (مساحت ثابت)', onclick: () => App.confirm('مستطیل‌سازی', 'مرز زمین‌های «خودکار» که بیش از ۱۲ رأس دارند با مستطیل هم‌مساحت جایگزین می‌شود (مساحت و ارزش‌ها تغییر نمی‌کند). پس از آن می‌توانید رأس‌ها را روی نقشه اصلاح کنید. ادامه؟', () => { const n = C.rectangleizeParcels(st, 12, 0.65); App.toast(App.n(n, 0) + ' مرز مستطیل شد', 'ok'); full(); }, 'مستطیل شود') }));
       if (items.some(x => x.fix === 'recalc')) bAud.appendChild(el('button', { class: 'btn sm sec2', id: 'audit-fix', text: 'همسان‌سازی ارزش‌های ثبت‌شده با متراژ × قیمت', onclick: () => { C.recalcAllValuations(st); full(); } }));
     }
 
@@ -402,7 +429,8 @@
 
     data = ev();
     drawStrip(); drawPool(); drawCat(); drawHouse(); drawPeople(); drawAuto(); drawPick(); markRows(); drawRes(); drawAudit(); drawCode(); drawPersons();
-    [strip, bPool, bCat, bHouse, bPeople, bAuto, bPick, bRes, bAud, bCode, bPer].forEach(b => r.appendChild(b));
+    roleLock();
+    [strip, bPool, bCat, bHouse, bPeople, bAuto, bPick, bRes, bAud, bCode, bPer].filter(b => adm || !(b === bPool || b === bAuto || b === bAud || b === bPer)).forEach(b => r.appendChild(b));
   }
 
   /* ---------- خروجی‌ها ---------- */

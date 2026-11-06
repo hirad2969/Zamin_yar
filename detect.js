@@ -14,7 +14,8 @@
     { tol: 18, g: 7 }, { tol: 24, g: 9.5 }, { tol: 31, g: 12 },
   ];
   const MIN_AREA = 250;        // پیکسل؛ کوچک‌تر از آن «زمین» حساب نمی‌شود
-  const MAX_VERTS = 45;
+  const MAX_VERTS = 7;        // زمین‌ها ساده‌اند: حداکثر ۷ رأس (شکل‌های پرپیچ‌وخم نادرست‌اند)
+  const HARD_VERTS = 12;
 
   const LIN = new Float32Array(256);
   for (let i = 0; i < 256; i++) { const c = i / 255; LIN[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
@@ -192,11 +193,16 @@
     return false;
   }
   function simplify(pts, area) {
-    let eps = Math.max(1.5, Math.sqrt(area) * 0.012), out = dp(pts, eps);
-    for (let k = 0; k < 14 && (out.length > MAX_VERTS || selfIntersects(out)); k++) { eps *= 1.3; out = dp(pts, eps); }
-    return out;
+    // تا ۷ رأس به شرطی که مساحت بیش از ۵٪ از ناحیه‌ی تشخیص‌داده‌شده فاصله نگیرد؛ وگرنه حداکثر ۱۲ رأس
+    let eps = Math.max(1.5, Math.sqrt(area) * 0.012), out = dp(pts, eps), best = null;
+    for (let k = 0; k < 30; k++) {
+      const bad = selfIntersects(out), a = ringArea(out), dev = area > 0 ? Math.abs(a - area) / area : 0;
+      if (!bad && out.length <= HARD_VERTS && dev <= 0.05) { best = out; if (out.length <= MAX_VERTS) return out; }
+      eps *= 1.25; out = dp(pts, eps);
+      if (out.length < 3) break;
+    }
+    return best || dp(pts, Math.max(1.5, Math.sqrt(area) * 0.02));
   }
-
 
   /* صف اولویت (هیپ دودویی) برای رشد ناحیه‌ی «ساحل‌به‌ساحل» */
   function Heap(cap) { this.k = new Float64Array(cap); this.v = new Int32Array(cap); this.n = 0; }

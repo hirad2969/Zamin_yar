@@ -10,7 +10,7 @@
     "test:detect": "node detect-test.js",
     "test:all": "node test.js && node dom-test.js && node detect-test.js",
     "test:e2e": "node e2e.js && node e2e-mobile.js && node e2e-detect.js && node e2e-seed.js",
-    "build:www": "rm -rf www && mkdir www && cp -r index.html style.css core.js detect.js sw.js manifest.webmanifest icons vendor js www/",
+    "build:www": "rm -rf www && mkdir www && cp -r index.html style.css core.js detect.js sw.js manifest.webmanifest icons vendor js data www/",
     "android:sync": "npm run build:www && npx cap sync android",
     "android:open": "npx cap open android"
   },

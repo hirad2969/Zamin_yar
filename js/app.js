@@ -3,7 +3,7 @@
   'use strict';
   const C = window.LandCore;
   C.setProj4(window.proj4);
-  const KEY = 'zamin-yar-state-v1';
+  const KEY = /[?&]role=partner/.test(location.search) ? 'zamin-yar-state-v1-partner' : 'zamin-yar-state-v1';
   const App = window.App = { C, S: null, ev: {}, storageOk: true };
 
   App.on = (e, f) => { (App.ev[e] = App.ev[e] || []).push(f); };

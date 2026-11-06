@@ -166,7 +166,7 @@
   function apply(r, fit) {
     const s = AD.st;
     s.last = r;
-    const useRect = s.snap && r.rect && (r.rectOk || r.rectFill >= 0.88);          // زمین کشاورزی معمولاً مستطیلی است
+    const useRect = s.snap && r.rect && (r.rectOk || r.rectFill >= 0.8);          // زمین کشاورزی معمولاً مستطیلی است
     const pix = useRect ? r.rect : r.ring;
     const ring = pix.map(p => LD.lngLat(s.g.x0 + p[0] + 0.5, s.g.y0 + p[1] + 0.5, s.z));
     s.level = r.level;

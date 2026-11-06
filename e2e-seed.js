@@ -19,5 +19,15 @@ const { chromium } = require('playwright');
   console.log('مانده‌ها (میلیون):', rem.map(v => Math.round(v / 1e6)).join(' '));
   t('پس از جبران، همه‌ی مانده‌ها زیر ۵۰ میلیون', rem.every(v => Math.abs(v) < 5e7));
   t('خطای اسکریپت ندارد', errs.length === 0); if (errs.length) console.log(errs);
+  // حالت شریک از طریق پیوند
+  const pid = await pg.evaluate(() => App.S.persons[2].id);
+  const pp = await b.newPage({ viewport: { width: 390, height: 800 } }); const perrs = []; pp.on('pageerror', e => perrs.push(e.message));
+  await pp.goto('http://localhost:8765/index.html?role=partner&me=' + encodeURIComponent(pid)); await pp.waitForTimeout(900);
+  t('شریک: فقط تب تقسیم دیده می‌شود', (await pp.$$eval('#tabs button', bs => bs.filter(x => x.offsetParent).length)) === 1);
+  t('شریک: ۵۸ زمین از نسخه‌ی منتشرشده', (await pp.evaluate(() => App.S.parcels.length)) === 58);
+  t('شریک: فیلتر و تقسیم خودکار ندارد', (await pp.$('#pool-box')) === null && (await pp.$('#auto-box')) === null);
+  t('شریک: ضرایب قفل', await pp.$$eval('#cat-table input', is => is.length > 0 && is.every(i => i.disabled)));
+  t('شریک: ذخیره‌ی جدا از مدیر', await pp.evaluate(() => !!localStorage.getItem('zamin-yar-state-v1-partner')));
+  t('شریک: بدون خطای اسکریپت', perrs.length === 0); if (perrs.length) console.log(perrs);
   await b.close(); process.exit(ok.every(Boolean) ? 0 : 1);
 })();

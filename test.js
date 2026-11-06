@@ -1202,6 +1202,20 @@ t('بازرسی: معادله‌های دقیق برقرارند و ناهمخو
   C.removeParcel(st, st.parcels[0].id); eq(st.parcels.length, 11);
 });
 
+
+t('مرز: مستطیل‌سازی با حفظ دقیق مساحت و ساده‌سازی مرز دندانه‌دار', () => {
+  const base = [[48.4, 33.5], [48.4012, 33.5003], [48.4009, 33.5011], [48.3997, 33.5008]];
+  const wig = []; for (let i = 0; i < 4; i++) { const a = base[i], b = base[(i + 1) % 4]; for (let k = 0; k < 10; k++) { const f = k / 10, j = (k % 2 ? 1 : -1) * 0.000002; wig.push([a[0] + (b[0] - a[0]) * f + j, a[1] + (b[1] - a[1]) * f - j]); } }
+  const A0 = C.areaM2(wig), rr = C.rectangleizeRing(wig);
+  ok(rr && rr.ring.length === 4 && rr.fill > 0.9, 'fill ' + (rr && rr.fill));
+  near(C.areaM2(rr.ring), A0, A0 * 1e-6);
+  const sm = C.simplifyRingSafe(wig, 8, 0.02); ok(sm && sm.length <= 12 && Math.abs(C.areaM2(sm) - A0) / A0 <= 0.02, 'ساده‌سازی');
+  ok(C.validateRing(rr.ring).valid && C.validateRing(sm).valid);
+  const st = C.newState(); const p = C.newParcel({ name: 'w' }); p.geometry = { ring: wig, source: 'auto' }; p.areaComputed = A0; st.parcels.push(p);
+  eq(C.rectangleizeParcels(st, 12, 0.65), 1); eq(st.parcels[0].geometry.ring.length, 4);
+  ok(C.auditState(st).every(x => !/مرزِ خودکار شکل نامنظم/.test(x.msg)));
+});
+
 console.log(`\nموفق: ${pass}  ناموفق: ${fail}`);
   process.exit(fail ? 1 : 0);
 })();

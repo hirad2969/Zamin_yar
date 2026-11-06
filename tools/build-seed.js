@@ -5,6 +5,9 @@ const C = require('../core.js');
 const st = JSON.parse(fs.readFileSync(path.join(__dirname, 'project-source.json'), 'utf8'));
 st.log = [{ at: C.nowIso(), msg: 'فهرست پیش‌فرض زمین‌ها بارگذاری شد' }];
 fs.writeFileSync(path.join(__dirname, '..', 'js', 'seed.js'), '/* فهرست پیش‌فرض زمین‌ها (ساخته‌شده با tools/build-seed.js) */\nwindow.ZY_SEED = ' + JSON.stringify(st) + ';\n');
+fs.mkdirSync(path.join(__dirname, '..', 'data'), { recursive: true });
+const pub = JSON.parse(JSON.stringify(st)); pub.publishedAt = '2026-11-06T00:00:00.000Z'; pub.access = { pin: null }; pub.log = [];
+fs.writeFileSync(path.join(__dirname, '..', 'data', 'published.json'), JSON.stringify(pub));   // نسخه‌ی منتشرشده برای پیوند شرکا (?role=partner)
 const d = C.divisionLive(st);
 const N = (f) => Number(f.n) / Number(f.d);
 console.log('زمین:', st.parcels.length, ' ارزش کل:', N(d.total));

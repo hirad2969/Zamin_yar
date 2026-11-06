@@ -135,5 +135,15 @@ console.log('۱۴) دو زمین هم‌رنگ با خط کمرنگ، بدون �
   ok(r.ok && a < one * 1.15 && a > one * 0.85, 'فقط یک زمین (' + a.toFixed(0) + ' از ' + one + ')');
 }
 
+console.log('۱۵) لبه‌ی دندانه‌دار (محصول ناصاف): خروجی ساده، حداکثر ۱۲ رأس و مستطیل پیشنهادی');
+{
+  const wob = (x, y) => Math.sin(x * 0.45) * 2.2 + Math.cos(y * 0.37) * 2.2;
+  const img = make(512, 512, (x, y) => inRect(x + wob(x, y), y + wob(y, x), 140, 130, 360, 310) ? GREEN : BROWN);
+  const truth = 220 * 180, r = D.prepare(img, { x: 250, y: 220 }).byArea(truth);
+  ok(r.ok && r.ring.length <= 12, 'رأس‌ها: ' + (r.ring || []).length);
+  ok(Math.abs(area(r.ring) - truth) / truth < 0.06, 'مساحت درون ۶٪ (' + area(r.ring).toFixed(0) + ')');
+  ok(r.rect && r.rectFill >= 0.8, 'پرشدگی مستطیل ' + (r.rectFill || 0).toFixed(3));
+}
+
 console.log('\nنتیجه:', pass, 'موفق،', fail, 'ناموفق');
 process.exit(fail ? 1 : 0);

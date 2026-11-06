@@ -2885,6 +2885,79 @@
     state.log = state.log || []; state.log.push({ at: nowIso(), msg: 'تقسیم خودکار متوازن: ' + plan.moves.length + ' زمین جابه‌جا/ثبت شد' });
   }
 
+  /** ساده‌سازی مرز پرپیچ‌وخم با حفظ مساحت (انحراف مساحت ≤ maxDev)؛ فقط وقتی رأس‌ها از maxVerts بیشترند */
+  function simplifyRingSafe(ring, maxVerts, maxDev) {
+    maxVerts = maxVerts || 8; maxDev = maxDev == null ? 0.01 : maxDev;
+    const r = openRing(ring); if (r.length <= maxVerts) return null;
+    const pl = localPlane(r), pts = r.map(p => pl.toXY(p)), A0 = ringAreaXY(pts);
+    const dp = (P, eps) => {
+      const keep = new Array(P.length).fill(false); keep[0] = keep[P.length - 1] = true;
+      const st = [[0, P.length - 1]];
+      while (st.length) {
+        const [a, b] = st.pop(); let m = -1, md = 0;
+        const dx = P[b][0] - P[a][0], dy = P[b][1] - P[a][1], L = Math.hypot(dx, dy) || 1e-12;
+        for (let i = a + 1; i < b; i++) { const d = Math.abs((P[i][0] - P[a][0]) * dy - (P[i][1] - P[a][1]) * dx) / L; if (d > md) { md = d; m = i; } }
+        if (md > eps && m > 0) { keep[m] = true; st.push([a, m], [m, b]); }
+      }
+      return P.filter((_, i) => keep[i]);
+    };
+    let best = null;
+    for (let eps = Math.sqrt(A0) * 0.004, k = 0; k < 40; k++, eps *= 1.18) {
+      const P = pts.concat([pts[0]]); let far = 1, fd = -1;
+      for (let i = 1; i < pts.length; i++) { const d = Math.hypot(pts[i][0] - pts[0][0], pts[i][1] - pts[0][1]); if (d > fd) { fd = d; far = i; } }
+      const o1 = dp(P.slice(0, far + 1), eps), o2 = dp(P.slice(far), eps), o = o1.concat(o2.slice(1)); o.pop();
+      if (o.length < 3) break;
+      const dev = Math.abs(ringAreaXY(o) - A0) / A0;
+      if (dev > maxDev) break;
+      best = o; if (o.length <= maxVerts) break;
+    }
+    return best && best.length < r.length ? best.map(q => pl.toLonLat(q)) : null;
+  }
+  /** کوچک‌ترین مستطیل چرخیده‌ی دربرگیرنده، با همان مساحتِ مرز اصلی (مقیاس حول مرکز) — برای مرزهای خودکارِ پرپیچ‌وخم */
+  function rectangleizeRing(ring) {
+    const r = openRing(ring); if (r.length < 3) return null;
+    const pl = localPlane(r), P = r.map(p => pl.toXY(p)), A0 = ringAreaXY(P);
+    const hull = (() => {
+      const S = P.map(p => p.slice()).sort((a, b) => a[0] - b[0] || a[1] - b[1]), cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+      const lo = [], up = [];
+      S.forEach(p => { while (lo.length > 1 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); });
+      S.slice().reverse().forEach(p => { while (up.length > 1 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); });
+      lo.pop(); up.pop(); return lo.concat(up);
+    })();
+    let best = null;
+    for (let i = 0; i < hull.length; i++) {
+      const a = hull[i], b = hull[(i + 1) % hull.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, ux = (b[0] - a[0]) / L, uy = (b[1] - a[1]) / L;
+      let u0 = 1e18, u1 = -1e18, v0 = 1e18, v1 = -1e18;
+      hull.forEach(p => { const u = (p[0] - a[0]) * ux + (p[1] - a[1]) * uy, v = -(p[0] - a[0]) * uy + (p[1] - a[1]) * ux; u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); });
+      const area = (u1 - u0) * (v1 - v0);
+      if (!best || area < best.area) best = { area, a, ux, uy, u0, u1, v0, v1 };
+    }
+    if (!best || best.area <= 0) return null;
+    const k = Math.sqrt(A0 / best.area), cu = (best.u0 + best.u1) / 2, cv = (best.v0 + best.v1) / 2, hu = (best.u1 - best.u0) / 2 * k, hv = (best.v1 - best.v0) / 2 * k;
+    const corner = (su, sv) => { const u = cu + su * hu, v = cv + sv * hv; return [best.a[0] + u * best.ux - v * best.uy, best.a[1] + u * best.uy + v * best.ux]; };
+    const q = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)].map(p => pl.toLonLat(p));
+    return { ring: q, fill: A0 / best.area };
+  }
+  /** مرزهای «خودکار» پرپیچ‌وخم (بیش از maxVerts رأس) را مستطیل می‌کند؛ مساحت و ارزش‌ها ثابت می‌ماند. فقط اگر پرشدگی ≥ minFill */
+  function rectangleizeParcels(state, maxVerts, minFill) {
+    let n = 0;
+    (state.parcels || []).forEach(p => {
+      const g = p.geometry; if (!g || !g.ring || g.source !== 'auto' || openRing(g.ring).length <= (maxVerts || 12)) return;
+      const rr = rectangleizeRing(g.ring); if (!rr || rr.fill < (minFill == null ? 0.65 : minFill)) return;
+      g.ring = rr.ring; g.source = 'auto'; g.meta = Object.assign({}, g.meta || {}, { regularized: 'مستطیل هم‌مساحت' }); p.areaComputed = areaM2(rr.ring); n++;
+    });
+    return n;
+  }
+  function simplifyParcels(state, maxVerts, maxDev) {
+    let n = 0;
+    (state.parcels || []).forEach(p => {
+      if (!p.geometry || !p.geometry.ring) return;
+      const nr = simplifyRingSafe(p.geometry.ring, maxVerts, maxDev); if (!nr) return;
+      p.geometry.ring = nr; p.areaComputed = areaM2(nr); n++;
+    });
+    return n;
+  }
+
   /* ---------------------------------------------------------------- */
   /* بازرسی محاسبات و داده‌ها                                            */
   /* ---------------------------------------------------------------- */
@@ -2903,6 +2976,12 @@
     add(noArea ? 'err' : 'ok', noArea ? noArea + ' زمین متراژ ندارد' : 'همه‌ی زمین‌ها متراژ دارند');
     add(noPrice ? 'warn' : 'ok', noPrice ? noPrice + ' زمین قیمت هر متر ندارد' : 'همه‌ی زمین‌ها قیمت دارند');
     add(stale ? 'warn' : 'ok', stale ? stale + ' زمین ارزشِ ثبت‌شده‌اش با «متراژ × قیمت» فرق دارد (در تقسیم همیشه خودِ ضرب حساب می‌شود)' : 'ارزش ثبت‌شده‌ی همه‌ی زمین‌ها با «متراژ × قیمت» می‌خواند', stale ? 'recalc' : null);
+    const wild = ps.filter(p => p.geometry && p.geometry.ring && openRing(p.geometry.ring).length > 12).length;
+    if (wild) add('warn', wild + ' زمین مرز پرپیچ‌وخم دارد (بیش از ۱۲ رأس)؛ زمین‌ها معمولاً مستطیلی/چهارضلعی‌اند. «ساده‌سازی مرزها» مساحت را کمتر از ۱٪ تغییر می‌دهد', 'simplify');
+    const odd = ps.filter(p => p.geometry && p.geometry.source === 'auto' && p.geometry.ring && openRing(p.geometry.ring).length > 12).filter(p => { const rr = rectangleizeRing(p.geometry.ring); return !rr || rr.fill < 0.65; });
+    if (odd.length) add('warn', odd.length + ' مرزِ خودکار شکل نامنظم دارد (پرشدگی مستطیل کم) و احتمالاً تشخیص بد است؛ روی نقشه با «رسم خودکار» دوباره بگیرید یا رأس‌ها را اصلاح کنید: ' + odd.slice(0, 4).map(p => (p.name || '').trim()).join('، '));
+    const ovr = ps.filter(p => isNum(p.areaOverride) && p.areaOverride > 0 && isNum(p.areaComputed) && p.areaComputed > 0 && Math.abs(p.areaOverride - p.areaComputed) / p.areaComputed > 0.03);
+    if (ovr.length) add('warn', ovr.length + ' زمین متراژ دستی دارد که بیش از ۳٪ با متراژ مرز فرق دارد (متراژ دستی ملاک است): ' + ovr.slice(0, 3).map(p => p.name).join('، '));
     if (dups.length) add('warn', 'نام تکراری: ' + dups.slice(0, 4).join('، '));
     add(d.errors.length ? 'err' : 'ok', d.errors.length ? d.errors.join(' | ') : 'سهم‌بندی دسته‌ها و مبلغ‌ها معتبر است');
     // معادله‌های ترازنامه (کسر دقیق)
@@ -2950,7 +3029,7 @@
     // پرونده‌ی زنده
     parcelSnap, caseParcels, createCase, convertScenarioToCase, addSection, setSectionWeight, sectionWeightFrac, addDeal, removePerson, evaluateCase, parseAdjust, sectionsFromEstates,
     // تقسیم زنده‌ی نسخه‌ی ۲ + ابزارهای انتخاب/تخصیص
-    divisionLive, canTake, setHolder, holderOfParcel, coOwnersOfParcel, sellerId, buyerIds, parcelLive, inPool, personTree, addSubPerson, removeSubPerson, balancePlan, applyPlan, balanceSearch, cashPlan, auditState, recalcAllValuations, houseNormal,
+    divisionLive, canTake, setHolder, holderOfParcel, coOwnersOfParcel, sellerId, buyerIds, parcelLive, inPool, personTree, addSubPerson, removeSubPerson, balancePlan, applyPlan, balanceSearch, cashPlan, auditState, recalcAllValuations, houseNormal, simplifyRingSafe, simplifyParcels, rectangleizeRing, rectangleizeParcels,
     normalizeDivisionSelection, parcelMatchesDivisionFilter, divisionTypeKey, divisionTypeLabel, divisionParcelIds, setDivisionSelection, sortDivisionParcels,
     setFamilySplitCount, setFamilyMember, familyBreakdown, randomAllocate,
     ALLOCATION_MODES, ALLOCATION_SPLITS, normalizeAllocationPolicy, automaticAllocationPlan, applyAutomaticAllocation,

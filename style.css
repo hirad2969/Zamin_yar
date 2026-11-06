@@ -248,3 +248,8 @@ table.t td .sub{display:block;color:var(--mut);font-size:11px;margin-top:2px}
 .law-table input{min-width:110px;width:100%}
 .law-table select{min-width:120px}
 @media(max-width:900px){.auto-policy-card .auto-fields{align-items:stretch;flex-direction:column}.auto-policy-card .auto-fields .f{width:100%}.mix-policy .checkline{display:flex}}
+
+/* نقش‌ها */
+#role-chip{margin-inline-start:auto}
+body.role-partner .tab:not(#tab-people){display:none!important}
+body.role-partner #role-btn{background:#fff2}
